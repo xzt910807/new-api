@@ -53,6 +53,10 @@ var (
 	UserSessionHourlyAlertThreshold  = DefaultUserSessionHourlyAlertThreshold
 )
 
+// SingleSessionLogin 单点登录：新登录成功后撤销同用户其他所有活跃会话，
+// 旧设备在下一次请求或刷新时被强制登出。用于防止会员账号多人共享。
+var SingleSessionLogin = false
+
 var OptionMap map[string]string
 var OptionMapRWMutex sync.RWMutex
 

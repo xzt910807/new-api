@@ -103,6 +103,14 @@ func createLoginSession(userID int, expectedAuthVersion int64, loginMethod, ip, 
 	if err := model.CreateUserSession(session); err != nil {
 		return nil, err
 	}
+	// 单点登录：新会话创建成功后撤销同用户其他所有活跃会话，旧设备
+	// 在下一次请求或刷新时因会话已撤销而被强制登出。撤销失败不影响
+	// 本次登录（登录本身已成功），仅记录日志待人工排查。
+	if common.SingleSessionLogin {
+		if revoked, revokeErr := model.RevokeOtherUserSessions(userID, session.SID, "single_session_login"); revokeErr != nil {
+			common.SysLog(fmt.Sprintf("single-session login revoke failed (user %d, revoked %d): %s", userID, revoked, revokeErr.Error()))
+		}
+	}
 	bundle, err := issueAuthBundle(session, session.SID+"."+refreshSecret, true)
 	if err != nil {
 		_, _ = model.RevokeUserSession(userID, session.SID, "token_issue_failed")

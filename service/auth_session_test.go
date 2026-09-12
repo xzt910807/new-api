@@ -429,3 +429,37 @@ func TestUserAuthVersionInvalidatesExistingSession(t *testing.T) {
 	_, err = CreateLoginSessionAtAuthVersion(user.Id, identity.UserAuthVersion, "2fa", "127.0.0.1", "test-agent")
 	assert.ErrorIs(t, err, ErrLoginSessionRevoked, "a pending 2FA flow must not survive an auth-version change")
 }
+
+func TestSingleSessionLoginRevokesPreviousSessions(t *testing.T) {
+	useTestSessionSecret(t)
+	user := setupAuthSessionTestDB(t)
+	previousSingleSession := common.SingleSessionLogin
+	common.SingleSessionLogin = true
+	t.Cleanup(func() { common.SingleSessionLogin = previousSingleSession })
+
+	first, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "agent-a")
+	require.NoError(t, err)
+	firstIdentity, err := ParseAccessToken(first.AccessToken)
+	require.NoError(t, err)
+	_, _, err = ValidateLoginSession(firstIdentity)
+	require.NoError(t, err)
+
+	second, err := CreateLoginSession(user.Id, "password", "10.0.0.2", "agent-b")
+	require.NoError(t, err)
+
+	// 旧设备：会话被撤销，下一次请求立即失效。
+	_, _, err = ValidateLoginSession(firstIdentity)
+	assert.ErrorIs(t, err, ErrLoginSessionRevoked)
+	storedFirst, err := model.GetUserSessionBySID(first.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusRevoked, storedFirst.Status)
+	assert.Equal(t, "single_session_login", storedFirst.RevokedReason)
+
+	// 新设备：会话保持活跃，旧 refresh token 也无法换回会话。
+	secondIdentity, err := ParseAccessToken(second.AccessToken)
+	require.NoError(t, err)
+	_, _, err = ValidateLoginSession(secondIdentity)
+	require.NoError(t, err)
+	_, _, err = RefreshLoginSession(first.RefreshToken, first.Session.SID, "10.0.0.2", "agent-b")
+	assert.ErrorIs(t, err, ErrLoginSessionRevoked)
+}
