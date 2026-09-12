@@ -266,6 +266,9 @@ export const channelFormSchema = z
     pass_through_body_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
+    // Key provider: 'channel' uses the channel's own keys (default),
+    // 'agnes_keys' schedules keys from the agnes_keys table
+    key_provider: z.enum(['channel', 'agnes_keys']).optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -447,6 +450,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   pass_through_body_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
+  key_provider: 'channel',
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -488,6 +492,7 @@ export function transformChannelToFormDefaults(
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    key_provider: 'channel' as 'channel' | 'agnes_keys',
   }
 
   if (channel.setting) {
@@ -507,6 +512,7 @@ export function transformChannelToFormDefaults(
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
+        key_provider: parsed.key_provider === 'agnes_keys' ? 'agnes_keys' : 'channel',
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -628,6 +634,8 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
+    // undefined keeps this key out of the JSON for regular channels
+    key_provider: formData.key_provider === 'agnes_keys' ? 'agnes_keys' : undefined,
   }
 
   const protocol = normalizeHttpProtocol(formData.http_protocol)

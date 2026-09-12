@@ -31,7 +31,10 @@ func CovertMjpActionToModelName(mjAction string) string {
 	return modelName
 }
 
-// PrepareMidjourneyTaskBilling sets the durable refund marker before the task is inserted.
+// PrepareMidjourneyTaskBilling sets the durable billing state before the task
+// is inserted. For membership-free requests it persists the original quota as
+// a stats-only marker (MembershipFree=true, prepared=false): settlement
+// charges nothing, and failure refunds roll back usage stats only.
 func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, quota int, shouldBill bool) (bool, error) {
 	if task == nil {
 		return false, errors.New("Midjourney task is nil")
@@ -39,6 +42,7 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	task.Quota = 0
 	task.TokenId = 0
 	task.BillingChannelId = 0
+	task.MembershipFree = false
 	if !shouldBill {
 		return false, nil
 	}
@@ -48,7 +52,9 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	if quota < 0 {
 		return false, errors.New("quota cannot be negative")
 	}
-	if relayInfo.BillingSource == BillingSourceSubscription {
+	// 会员免费优先于订阅检查（与 PreConsumeBilling 一致：免费请求不涉及任何资金来源）。
+	membershipFree := relayInfo.IsMembershipFreeModel
+	if !membershipFree && relayInfo.BillingSource == BillingSourceSubscription {
 		return false, errors.New("legacy Midjourney billing does not support subscriptions")
 	}
 
@@ -56,6 +62,11 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	task.BillingChannelId = task.ChannelId
 	if relayInfo.ChannelMeta != nil && relayInfo.ChannelId > 0 {
 		task.BillingChannelId = relayInfo.ChannelId
+	}
+	task.MembershipFree = membershipFree
+	if membershipFree {
+		// 不进入资金结算（prepared=false），quota 仅作统计回滚标记。
+		return false, nil
 	}
 	return true, nil
 }
@@ -97,6 +108,18 @@ func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.M
 func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason string) bool {
 	quota := task.Quota
 	if quota == 0 {
+		return true
+	}
+
+	// 会员免费任务未预扣资金与令牌：失败时仅对称回减提交阶段记入的
+	// 统计用量，不做资金退款，也不产生退款日志（防止双重退款）。
+	if task.MembershipFree {
+		model.UpdateUserUsedQuota(task.UserId, -quota)
+		model.UpdateChannelUsedQuota(task.GetBillingChannelId(), -quota)
+		task.Quota = 0
+		if err := task.UpdateBillingState(); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("会员免费任务回减统计后清除 quota 失败 task %s: %s", task.MjId, err.Error()))
+		}
 		return true
 	}
 

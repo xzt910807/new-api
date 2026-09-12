@@ -251,6 +251,9 @@ export interface LogOtherData {
   subscription_consumed?: number
   subscription_remain?: number
   subscription_total?: number
+  // Membership free: request billed at 0 for an active member; log quota
+  // keeps the original price for reference (tooltip on the cost badge).
+  membership_free?: boolean
 }
 
 /**

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/tidwall/gjson"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
@@ -193,6 +194,57 @@ func ApplyOriginTaskAffinity(c *gin.Context, info *relaycommon.RelayInfo) *dto.T
 // 估算计费(EstimateBilling) → 计算价格 → 预扣费（仅首次）→
 // 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
 // 共享控制器编排负责未落库退款、最终额度预留、落库和结算。
+// resolveTaskBillingModel 根据任务请求中的时长、分辨率等参数，为 Agnes 视频模型
+// 解析出对应的阶梯计费模型名（如 video-short-480p）。如果解析失败或未配置对应价格，
+// 回退到原始模型名，保持其他任务模型行为不变。
+func resolveTaskBillingModel(c *gin.Context, originModel string) string {
+	if !strings.Contains(originModel, "agnes-video") {
+		return originModel
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	duration := 0
+	resolution := ""
+	if err == nil {
+		duration = req.Duration
+		if duration == 0 && strings.TrimSpace(req.Seconds) != "" {
+			duration, _ = strconv.Atoi(req.Seconds)
+		}
+		resolution = strings.TrimSpace(req.Resolution)
+	}
+	if duration <= 0 || resolution == "" {
+		if storage, storageErr := common.GetBodyStorage(c); storageErr == nil {
+			_, _ = storage.Seek(0, io.SeekStart)
+			if body, bodyErr := storage.Bytes(); bodyErr == nil && gjson.ValidBytes(body) {
+				if d := gjson.GetBytes(body, "duration"); d.Exists() {
+					duration = int(d.Int())
+				} else if s := gjson.GetBytes(body, "seconds"); s.Exists() {
+					duration = int(s.Int())
+				}
+				if resolution == "" {
+					resolution = strings.TrimSpace(gjson.GetBytes(body, "resolution").String())
+				}
+			}
+		}
+	}
+	if duration <= 0 || resolution == "" {
+		return originModel
+	}
+	bucket := "short"
+	switch {
+	case duration < 6:
+		bucket = "short"
+	case duration < 12:
+		bucket = "medium"
+	default:
+		bucket = "long"
+	}
+	billingKey := fmt.Sprintf("video-%s-%s", bucket, resolution)
+	if helper.HasModelBillingConfig(billingKey) {
+		return billingKey
+	}
+	return originModel
+}
+
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
 	info.InitChannelMeta(c)
 
@@ -231,6 +283,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 价格计算：基础模型价格
 	info.OriginModelName = modelName
+	// Agnes 视频任务根据时长和分辨率匹配阶梯计费模型（如 video-short-480p）。
+	// 计费模型仅用于价格查询，不影响上游渠道选择和插件请求。
+	originalModelName := modelName
+	billingModelName := resolveTaskBillingModel(c, modelName)
+	if billingModelName != modelName {
+		modelName = billingModelName
+		info.OriginModelName = modelName
+	}
+
 	var priceData types.PriceData
 	var err error
 	if billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr {
@@ -266,6 +327,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 			return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
 		}
 	}
+	// 恢复原始模型名，避免影响后续上游请求构建和任务持久化
+	modelName = originalModelName
+	info.OriginModelName = originalModelName
 	info.PriceData = priceData
 
 	// 5. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）

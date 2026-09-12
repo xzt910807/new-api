@@ -172,6 +172,9 @@ type SubscriptionPlan struct {
 	// Max purchases per user (0 = unlimited)
 	MaxPurchasePerUser int `json:"max_purchase_per_user" gorm:"type:int;default:0"`
 
+	// Whether this plan is a membership plan (grants free access to selected models)
+	IsMembership bool `json:"is_membership" gorm:"default:false"`
+
 	// Upgrade user group after purchase (empty = no change)
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 
@@ -275,6 +278,9 @@ type UserSubscription struct {
 
 	// Whether wallet fallback is allowed after this subscription's quota is exhausted (snapshot from plan)
 	AllowWalletOverflow bool `json:"allow_wallet_overflow"`
+
+	// Whether this subscription is a membership subscription
+	IsMembership bool `json:"is_membership"`
 
 	CreatedAt int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
@@ -491,6 +497,19 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
+	if plan.IsMembership {
+		now := GetDBTimestamp()
+		var activeMembership UserSubscription
+		if err := tx.Where("user_id = ? AND status = ? AND end_time > ? AND is_membership = ?",
+			userId, "active", now, true).
+			Limit(1).
+			Find(&activeMembership).Error; err != nil {
+			return nil, err
+		}
+		if activeMembership.Id > 0 {
+			return nil, errors.New("用户已存在有效会员套餐，请到期后再开通")
+		}
+	}
 	if plan.MaxPurchasePerUser > 0 {
 		var count int64
 		if err := tx.Model(&UserSubscription{}).
@@ -548,6 +567,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		PrevUserGroup:       prevGroup,
 		DowngradeGroup:      strings.TrimSpace(plan.DowngradeGroup),
 		AllowWalletOverflow: allowWalletOverflow,
+		IsMembership:        plan.IsMembership,
 		CreatedAt:           common.GetTimestamp(),
 		UpdatedAt:           common.GetTimestamp(),
 	}
@@ -874,6 +894,41 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// HasActiveUserMembership returns whether the user has an active membership subscription.
+func HasActiveUserMembership(userId int) (bool, error) {
+	if userId <= 0 {
+		return false, errors.New("invalid userId")
+	}
+	now := common.GetTimestamp()
+	var count int64
+	if err := DB.Model(&UserSubscription{}).
+		Where("user_id = ? AND status = ? AND end_time > ? AND is_membership = ?", userId, "active", now, true).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// GetActiveUserMembership returns the user's active membership subscription, if any.
+// When multiple active memberships exist, returns the one with the latest end_time.
+func GetActiveUserMembership(userId int) (*UserSubscription, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid userId")
+	}
+	now := common.GetTimestamp()
+	var sub UserSubscription
+	if err := DB.Where("user_id = ? AND status = ? AND end_time > ? AND is_membership = ?", userId, "active", now, true).
+		Order("end_time desc, id desc").
+		Limit(1).
+		Find(&sub).Error; err != nil {
+		return nil, err
+	}
+	if sub.Id == 0 {
+		return nil, nil
+	}
+	return &sub, nil
 }
 
 // UserActiveSubscriptionsAllowWalletOverflow returns whether wallet balance may be used

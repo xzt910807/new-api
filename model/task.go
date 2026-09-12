@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"reflect"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -120,6 +121,13 @@ type TaskPrivateData struct {
 	// disconnect regardless; this only echoes the protocol-level request
 	// attribute back on retrieval snapshots.
 	ResponsesBackground bool `json:"responses_background,omitempty"`
+	// AgnesKeyID/AgnesKeySeconds 记录 agnes_keys 密钥池的入账信息：
+	// 提交成功后按请求秒数计入该 key 的 video_used，任务失败时据此退回。
+	AgnesKeyID      int     `json:"agnes_key_id,omitempty"`
+	AgnesKeySeconds float64 `json:"agnes_key_seconds,omitempty"`
+	// TempFiles 记录任务提交时引用的本地上传临时文件路径，任务到达终态后由
+	// 轮询循环负责清理。仅保存 data/uploads/ 下的文件路径，外部 URL 不记录。
+	TempFiles []string `json:"temp_files,omitempty"`
 }
 
 type TaskExecutionSnapshot struct {
@@ -153,6 +161,9 @@ type TaskBillingContext struct {
 	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+	// MembershipFree 标记会员免费任务：提交阶段未预扣资金，
+	// 轮询阶段的差额结算与失败退款必须跳过，防止对免费任务误收费或凭空退款。
+	MembershipFree bool `json:"membership_free,omitempty"`
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
@@ -188,7 +199,7 @@ func (p *TaskPrivateData) Scan(val interface{}) error {
 }
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
-	if (p == TaskPrivateData{}) {
+	if reflect.DeepEqual(p, TaskPrivateData{}) {
 		return nil, nil
 	}
 	return common.Marshal(p)

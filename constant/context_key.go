@@ -39,6 +39,10 @@ const (
 	ContextKeyChannelIsMultiKey        ContextKey = "channel_is_multi_key"
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
+	// ContextKeyAgnesKeyMeta carries the *model.AgnesKey picked from the
+	// agnes_keys pool for key_provider=agnes_keys channels, so the task
+	// submission path can charge video seconds to the right pool entry.
+	ContextKeyAgnesKeyMeta ContextKey = "agnes_key_meta"
 
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"

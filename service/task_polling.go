@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -331,6 +333,7 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 			if task.Status == model.TaskStatusFailure && !billingSettled && task.Quota != 0 {
 				RefundTaskQuota(ctx, task, task.FailReason)
 			}
+			cleanupTaskTempFiles(ctx, task)
 		}
 	}
 	return nil
@@ -446,6 +449,13 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	privateData := task.PrivateData
 	if privateData.Key != "" {
 		key = privateData.Key
+	} else if ch.GetSetting().KeyProvider == dto.KeyProviderAgnesKeys {
+		// agnes_keys 渠道的历史任务未存密钥：从池中取任意启用密钥兜底轮询。
+		if pooledKey, err := model.AgnesAnyEnabledKey(ch.GetBaseURL()); err == nil {
+			key = pooledKey
+		} else {
+			return fmt.Errorf("agnes_keys no enabled key for polling task %s: %w", taskId, err)
+		}
 	}
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
@@ -578,9 +588,30 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		if task.Status == model.TaskStatusFailure && !billingSettled && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, task.FailReason)
 		}
+		cleanupTaskTempFiles(ctx, task)
 	}
 
 	return nil
+}
+
+func cleanupTaskTempFiles(ctx context.Context, task *model.Task) {
+	if len(task.PrivateData.TempFiles) == 0 {
+		return
+	}
+	for _, path := range task.PrivateData.TempFiles {
+		if !strings.HasPrefix(path, "data/uploads/") {
+			logger.LogWarn(ctx, fmt.Sprintf("Refusing to remove non-upload temp path %s for task %s", path, task.TaskID))
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			if !os.IsNotExist(err) {
+				logger.LogWarn(ctx, fmt.Sprintf("Failed to remove temp file %s for task %s: %v", path, task.TaskID, err))
+			}
+		} else {
+			logger.LogDebug(ctx, "Removed temp file %s for task %s", path, task.TaskID)
+		}
+		_ = os.Remove(filepath.Dir(path))
+	}
 }
 
 func redactVideoResponseBody(body []byte) []byte {

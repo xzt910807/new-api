@@ -156,6 +156,10 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	if relayInfo == nil || other == nil {
 		return
 	}
+	// membership_free: 会员免费模型请求，实际扣费为 0（日志 Quota 保留原价供前端展示）
+	if relayInfo.IsMembershipFreeModel {
+		other["membership_free"] = true
+	}
 	// billing_source: "wallet" or "subscription"
 	if relayInfo.BillingSource != "" {
 		other["billing_source"] = relayInfo.BillingSource
@@ -296,6 +300,9 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData hosttypes.P
 	other["group_ratio"] = priceData.GroupRatioInfo.GroupRatio
 	if priceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
+	}
+	if relayInfo != nil && relayInfo.IsMembershipFreeModel {
+		other["membership_free"] = true
 	}
 	appendRequestPath(nil, relayInfo, other)
 	return other

@@ -203,6 +203,11 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	}
 	modelName := service.CovertMjpActionToModelName(constant.MjActionSwapFace)
 
+	// 会员免费：跳过余额检查与扣费，日志仍按原价记录。
+	if service.IsMembershipFreeRequest(info) {
+		info.IsMembershipFreeModel = true
+	}
+
 	priceData, err := helper.ModelPriceHelperPerCall(c, info)
 	if err != nil {
 		return &dto.MidjourneyResponse{
@@ -211,18 +216,20 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(info.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
+	if !info.IsMembershipFreeModel {
+		userQuota, err := model.GetUserQuota(info.UserId, false)
+		if err != nil {
+			return &dto.MidjourneyResponse{
+				Code:        4,
+				Description: err.Error(),
+			}
 		}
-	}
 
-	if userQuota-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
+		if userQuota-priceData.Quota < 0 {
+			return &dto.MidjourneyResponse{
+				Code:        4,
+				Description: "quota_not_enough",
+			}
 		}
 	}
 	requestURL := getMjRequestPath(c.Request.URL.String())
@@ -268,18 +275,23 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	if billingErr != nil {
 		common.SysLog("error settling Midjourney quota: " + billingErr.Error())
 	}
-	if billingApplied {
+	// 免费任务的 quota 已由 Prepare 持久化为原价（仅统计标记，未扣资金）
+	if billingApplied || midjourneyTask.MembershipFree {
 		billingChannelId := midjourneyTask.GetBillingChannelId()
 		tokenName := c.GetString("token_name")
 		logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s", priceData.ModelPrice, priceData.GroupRatioInfo.GroupRatio, constant.MjActionSwapFace)
 		other := service.GenerateMjOtherInfo(info, priceData)
+		logTokenId := midjourneyTask.TokenId
+		if midjourneyTask.MembershipFree {
+			logTokenId = info.TokenId
+		}
 		model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 			ChannelId: billingChannelId,
 			ModelName: modelName,
 			TokenName: tokenName,
 			Quota:     midjourneyTask.Quota,
 			Content:   logContent,
-			TokenId:   midjourneyTask.TokenId,
+			TokenId:   logTokenId,
 			Group:     info.UsingGroup,
 			Other:     other,
 		})
@@ -516,6 +528,11 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 
 	modelName := service.CovertMjpActionToModelName(midjRequest.Action)
 
+	// 会员免费：跳过余额检查与扣费，日志仍按原价记录。
+	if service.IsMembershipFreeRequest(relayInfo) {
+		relayInfo.IsMembershipFreeModel = true
+	}
+
 	priceData, err := helper.ModelPriceHelperPerCall(c, relayInfo)
 	if err != nil {
 		return &dto.MidjourneyResponse{
@@ -524,18 +541,20 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
+	if !relayInfo.IsMembershipFreeModel {
+		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+		if err != nil {
+			return &dto.MidjourneyResponse{
+				Code:        4,
+				Description: err.Error(),
+			}
 		}
-	}
 
-	if consumeQuota && userQuota-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
+		if consumeQuota && userQuota-priceData.Quota < 0 {
+			return &dto.MidjourneyResponse{
+				Code:        4,
+				Description: "quota_not_enough",
+			}
 		}
 	}
 
@@ -633,18 +652,23 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	if billingErr != nil {
 		common.SysLog("error settling Midjourney quota: " + billingErr.Error())
 	}
-	if billingApplied {
+	// 免费任务的 quota 已由 Prepare 持久化为原价（仅统计标记，未扣资金）
+	if billingApplied || midjourneyTask.MembershipFree {
 		billingChannelId := midjourneyTask.GetBillingChannelId()
 		tokenName := c.GetString("token_name")
 		logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s，ID %s", priceData.ModelPrice, priceData.GroupRatioInfo.GroupRatio, midjRequest.Action, midjResponse.Result)
 		other := service.GenerateMjOtherInfo(relayInfo, priceData)
+		logTokenId := midjourneyTask.TokenId
+		if midjourneyTask.MembershipFree {
+			logTokenId = relayInfo.TokenId
+		}
 		model.RecordConsumeLog(c, relayInfo.UserId, model.RecordConsumeLogParams{
 			ChannelId: billingChannelId,
 			ModelName: modelName,
 			TokenName: tokenName,
 			Quota:     midjourneyTask.Quota,
 			Content:   logContent,
-			TokenId:   midjourneyTask.TokenId,
+			TokenId:   logTokenId,
 			Group:     relayInfo.UsingGroup,
 			Other:     other,
 		})

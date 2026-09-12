@@ -29,6 +29,7 @@ export type TopNavLink = {
   disabled?: boolean
   requiresAuth?: boolean
   external?: boolean
+  newTab?: boolean
 }
 
 /**
@@ -106,12 +107,14 @@ export function useTopNavLinks(): TopNavLink[] {
   }
 
   // Canvas (SSO relay page: fetches a short-lived token with the auth header
-  // and redirects to infinite-canvas; a direct link cannot carry the token)
+  // and redirects to infinite-canvas; a direct link cannot carry the token).
+  // Opened in a new tab so the current new-api page is left untouched.
   if (modules?.canvas !== false && canvasSSOUrl) {
     links.push({
       title: t('Canvas'),
       href: '/canvas-sso',
       requiresAuth: !isAuthed,
+      newTab: true,
     })
   }
 

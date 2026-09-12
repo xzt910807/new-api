@@ -45,6 +45,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	other := make(map[string]interface{})
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
+	if info.IsMembershipFreeModel {
+		other["membership_free"] = true
+	}
 	other["model_price"] = info.PriceData.ModelPrice
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
@@ -214,8 +217,37 @@ func taskModelName(task *model.Task) string {
 // 当异步任务失败时，退还资金与令牌额度，并回减用户和渠道用量。
 // 返回资金来源是否已成功退还；失败时保留 quota，供显式重试或人工对账。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
+	// 会员免费任务在提交阶段未预扣任何资金与令牌额度：
+	// 失败时仅回退渠道密钥池等非资金记账并清零持久化标记，
+	// 不做资金退款，防止与提交阶段的归零结算叠加成双重退款。
+	membershipFree := task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.MembershipFree
 	quota := task.Quota
-	if quota == 0 {
+	if quota == 0 && !membershipFree {
+		return true
+	}
+
+	// agnes_keys 密钥池：视频任务失败时把已入账的秒数退回池条目。
+	// task.Quota != 0 守卫保证本钩子至多触发一次（quota 在函数尾部清零）。
+	if task.PrivateData.AgnesKeyID != 0 && task.PrivateData.AgnesKeySeconds > 0 {
+		if err := model.AgnesRefundVideoSeconds(task.PrivateData.AgnesKeyID, task.PrivateData.AgnesKeySeconds); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("agnes_keys 退回视频秒数失败 task %s key_id %d: %s", task.TaskID, task.PrivateData.AgnesKeyID, err.Error()))
+		} else {
+			logger.LogInfo(ctx, fmt.Sprintf("agnes_keys 视频任务失败退秒 task %s key_id %d: %.2fs", task.TaskID, task.PrivateData.AgnesKeyID, task.PrivateData.AgnesKeySeconds))
+		}
+		task.PrivateData.AgnesKeySeconds = 0
+	}
+
+	if membershipFree {
+		// 未预扣资金与令牌：仅对称回减提交阶段记入的统计用量，
+		// 并清零持久化标记，防止重复触发。
+		if quota != 0 {
+			model.UpdateUserUsedQuota(task.UserId, -quota)
+			model.UpdateChannelUsedQuota(task.ChannelId, -quota)
+			task.Quota = 0
+			if err := task.UpdateQuota(); err != nil {
+				logger.LogError(ctx, fmt.Sprintf("会员免费任务退款后清除 quota 失败 task %s: %s", task.TaskID, err.Error()))
+			}
+		}
 		return true
 	}
 
@@ -263,6 +295,12 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
 	if actualQuota < 0 {
+		return
+	}
+	// 会员免费任务提交时已按 0 结算（SettleBilling 归零），异步差额结算一律跳过，
+	// 防止 token 重算 / adaptor 调整对免费任务实际收费。
+	if task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.MembershipFree {
+		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 为会员免费请求，跳过差额结算（%s）", task.TaskID, reason))
 		return
 	}
 	preConsumedQuota := task.Quota

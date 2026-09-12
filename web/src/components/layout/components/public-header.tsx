@@ -218,7 +218,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             <div className='hidden items-center gap-0.5 sm:flex'>
               {links.map((link, i) => {
                 const isActive = pathname === link.href
-                if (link.external) {
+                if (link.external || link.newTab) {
                   return (
                     <a
                       key={i}
@@ -361,7 +361,7 @@ export function PublicHeader(props: PublicHeaderProps) {
               const transitionStyle = {
                 transitionDelay: mobileOpen ? `${100 + i * 50}ms` : '0ms',
               }
-              if (link.external) {
+              if (link.external || link.newTab) {
                 return (
                   <a
                     key={i}

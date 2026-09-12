@@ -19,6 +19,9 @@ func SetRouter(router *gin.Engine, assets WebAssets) {
 	SetTaskPluginProtocolRouter(router)
 	SetVideoRouter(router)
 	SetTaskRouter(router)
+	// Static uploads directory used by the playground gallery.
+	// Must be registered before the catch-all web router.
+	router.Static("/uploads", "data/uploads")
 	pluginDispatcher := SetPluginRouter(router)
 	frontendBaseUrl := os.Getenv("FRONTEND_BASE_URL")
 	if common.IsMasterNode && frontendBaseUrl != "" {

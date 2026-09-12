@@ -149,3 +149,56 @@ export interface GroupOption {
   ratio: number
   desc?: string
 }
+
+// Task playground types
+export interface TaskPluginOption {
+  key: string
+  name: string
+  models: string[]
+}
+
+export interface TaskModelOption {
+  label: string
+  value: string
+  pluginKey: string
+}
+
+export type TaskMode = 'text-to-video' | 'image-to-video'
+
+export type TaskWorkflowStep = 'prompt' | 'image' | 'video'
+
+export interface GalleryItem {
+  id: string
+  url: string
+  source: 'upload' | 'generated'
+}
+
+export interface TaskSubmitRequest {
+  model: string
+  prompt: string
+  image?: string
+  images?: string[]
+  size?: string
+  resolution?: string
+  duration?: number
+  group?: string
+}
+
+export interface TaskSubmitResponse {
+  id: string
+  task_id: string
+  status: string
+  model?: string
+  created_at?: number
+}
+
+export interface TaskItem {
+  id?: string
+  task_id: string
+  platform?: string
+  status: string
+  progress?: string
+  fail_reason?: string
+  created_at?: number
+  finished_at?: number
+}

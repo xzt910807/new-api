@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -339,6 +340,48 @@ func TestSelectChannelsForAutomaticTestAutoBanOnlyUsesEligibleChannels(t *testin
 	require.Len(t, selected, 2)
 	require.Equal(t, 1, selected[0].Id)
 	require.Equal(t, 3, selected[1].Id)
+}
+
+func TestSelectChannelsForAutomaticTestSkipsTaskPluginChannels(t *testing.T) {
+	channels := []*model.Channel{
+		{Id: 1, Status: common.ChannelStatusEnabled, Type: constant.ChannelTypeOpenAI},
+		{Id: 2, Status: common.ChannelStatusEnabled, Type: constant.ChannelTypeTaskPlugin},
+	}
+
+	selected := selectChannelsForAutomaticTest(channels, operation_setting.ChannelTestModeScheduledAll)
+
+	require.Len(t, selected, 1)
+	require.Equal(t, 1, selected[0].Id)
+}
+
+// 渠道测试按钮对图像生成模型必须走 /v1/images/generations 协议，
+// 否则上游会以 "is an image model" 拒绝（用户报告的 agnes-image 场景）。
+func TestBuildTestRequestAutoDetectsImageGenerationModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		model     string
+		wantImage bool
+	}{
+		{name: "agnes image model", model: "agnes-image-2.1-flash", wantImage: true},
+		{name: "dall-e-3", model: "dall-e-3", wantImage: true},
+		{name: "gpt-image-1", model: "gpt-image-1", wantImage: true},
+		{name: "chat model", model: "gpt-4o-mini", wantImage: false},
+		{name: "agnes video model", model: "agnes-video-v2.0", wantImage: false},
+	}
+
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := buildTestRequest(test.model, "", channel, false)
+
+			imageReq, isImage := request.(*dto.ImageRequest)
+			require.Equal(t, test.wantImage, isImage)
+			if test.wantImage {
+				assert.Equal(t, test.model, imageReq.Model)
+				assert.Equal(t, uint(1), lo.FromPtr(imageReq.N))
+			}
+		})
+	}
 }
 
 func TestRunChannelTestWorkersHonorsConfiguredConcurrency(t *testing.T) {

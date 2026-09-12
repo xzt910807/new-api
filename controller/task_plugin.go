@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -593,6 +594,64 @@ func GetTaskPluginOptions(c *gin.Context) {
 	}
 	sort.Slice(options, func(i, j int) bool { return options[i]["key"].(string) < options[j]["key"].(string) })
 	common.ApiSuccess(c, options)
+}
+
+
+// GetUserTaskModels returns task-plugin models that are both registered and
+// available to the current user through their usable groups. This is used by
+// the task playground to populate the model selector.
+func GetUserTaskModels(c *gin.Context) {
+	userId := c.GetInt("id")
+	user, err := model.GetUserCache(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	groups := service.GetUserUsableGroups(user.Group)
+	groupList := make([]string, 0, len(groups))
+	for g := range groups {
+		groupList = append(groupList, g)
+	}
+	enabledModels := service.GetGroupsEnabledModels(groupList)
+	enabledModelSet := make(map[string]struct{}, len(enabledModels))
+	for _, m := range enabledModels {
+		enabledModelSet[m] = struct{}{}
+	}
+
+	snapshot := jsplugin.DefaultRegistry.Snapshot()
+	result := make([]gin.H, 0)
+	seen := make(map[string]bool)
+	for _, metas := range [][]jsplugin.Meta{snapshot.Override, snapshot.Factory} {
+		for _, meta := range metas {
+			if seen[meta.Key] {
+				continue
+			}
+			if _, ok := jsplugin.DefaultRegistry.Get(meta.Key); !ok {
+				continue
+			}
+			seen[meta.Key] = true
+
+			models := make([]string, 0, len(meta.Models))
+			for _, m := range meta.Models {
+				if _, ok := enabledModelSet[m]; ok {
+					models = append(models, m)
+				}
+			}
+			if len(models) == 0 {
+				continue
+			}
+			result = append(result, gin.H{
+				"key":    meta.Key,
+				"name":   meta.Name,
+				"models": models,
+			})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i]["key"].(string) < result[j]["key"].(string)
+	})
+	common.ApiSuccess(c, result)
 }
 
 var taskPluginSyncState = struct {

@@ -289,6 +289,7 @@ const SENSITIVE_FORM_FIELDS = [
   'azure_responses_version',
   'force_format',
   'thinking_to_content',
+  'key_provider',
   'proxy',
   'http_protocol',
   'http2_connection_shards',
@@ -345,6 +346,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.system_prompt?.trim() ||
     values.force_format ||
     values.thinking_to_content ||
+    values.key_provider === 'agnes_keys' ||
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     (values.http_protocol && values.http_protocol !== 'auto') ||
@@ -3011,6 +3013,66 @@ export function ChannelMutateDrawer({
                                   )}
                                 />
                               )}
+
+                              <FormField
+                                control={form.control}
+                                name='key_provider'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Key Provider')}
+                                    </FormLabel>
+                                    <Select
+                                      items={[
+                                        {
+                                          value: 'channel',
+                                          label: t('Channel key'),
+                                        },
+                                        {
+                                          value: 'agnes_keys',
+                                          label: t('agnes_keys Table'),
+                                        },
+                                      ]}
+                                      value={field.value || 'channel'}
+                                      onValueChange={(value) =>
+                                        field.onChange(
+                                          value === 'agnes_keys'
+                                            ? 'agnes_keys'
+                                            : 'channel'
+                                        )
+                                      }
+                                    >
+                                      <FormControl>
+                                        <SelectTrigger>
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                      </FormControl>
+                                      <SelectContent
+                                        alignItemWithTrigger={false}
+                                      >
+                                        <SelectGroup>
+                                          <SelectItem value='channel'>
+                                            {t('Channel key')}
+                                          </SelectItem>
+                                          <SelectItem value='agnes_keys'>
+                                            {t('agnes_keys Table')}
+                                          </SelectItem>
+                                        </SelectGroup>
+                                      </SelectContent>
+                                    </Select>
+                                    <FormDescription>
+                                      {field.value === 'agnes_keys'
+                                        ? t(
+                                            'Keys are scheduled from the agnes_keys table by priority and daily quota; the channel key is ignored'
+                                          )
+                                        : t(
+                                            'Use the key configured on this channel'
+                                          )}
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
 
                               <FormField
                                 control={form.control}

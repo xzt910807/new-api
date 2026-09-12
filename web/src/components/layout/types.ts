@@ -97,6 +97,12 @@ export type TopNavLink = {
   disabled?: boolean
   requiresAuth?: boolean
   external?: boolean
+  /**
+   * Open the link in a new browser tab (kept distinct from `external`,
+   * which means the URL points to another site). Used by the Canvas SSO
+   * relay route so the current new-api page stays untouched.
+   */
+  newTab?: boolean
 }
 
 /**

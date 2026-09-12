@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -706,6 +709,7 @@ func executeTaskSubmissionWith(
 
 	stage = "insert"
 	task := model.InitTask(result.Platform, relayInfo)
+	task.PrivateData.TempFiles = extractTempImageFilesFromRequest(c)
 	task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 	task.PrivateData.BillingSource = relayInfo.BillingSource
@@ -720,6 +724,7 @@ func executeTaskSubmissionWith(
 		OriginModelName: relayInfo.OriginModelName,
 		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
+		MembershipFree:  relayInfo.IsMembershipFreeModel,
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData
@@ -739,9 +744,24 @@ func executeTaskSubmissionWith(
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		}
 	}
+	// agnes_keys 密钥池：视频任务按请求秒数入账（提交即失败不入账），
+	// 并把选中密钥持久化到 PrivateData，轮询阶段复用同一密钥、失败时退秒。
+	if agnesKey := agnesKeyMetaFromContext(c); agnesKey != nil &&
+		!(result.Immediate != nil && result.Immediate.Status == model.TaskStatusFailure) {
+		if seconds := agnesVideoSecondsForCharge(c, relayInfo); seconds > 0 {
+			if chargeErr := model.AgnesAddVideoSeconds(agnesKey.Id, seconds); chargeErr != nil {
+				logger.LogError(c, fmt.Sprintf("agnes_keys charge video seconds failed: task=%s key_id=%d err=%v", task.TaskID, agnesKey.Id, chargeErr))
+			} else {
+				task.PrivateData.Key = agnesKey.ApiKey
+				task.PrivateData.AgnesKeyID = agnesKey.Id
+				task.PrivateData.AgnesKeySeconds = seconds
+			}
+		}
+	}
 	diagnostics.insertStart(task)
 	if insertErr := task.InsertWithContext(c.Request.Context()); insertErr != nil {
 		common.SysError("insert task error: " + insertErr.Error())
+		agnesRefundVideoSecondsForTask(task)
 		taskErr = service.TaskErrorWrapperLocal(errors.New("failed to persist task"), "task_insert_failed", http.StatusInternalServerError)
 		diagnostics.failed("insert", "database_error", taskErr, false)
 		return nil, taskErr
@@ -761,6 +781,65 @@ func executeTaskSubmissionWith(
 	diagnostics.complete(task, result.Quota)
 
 	return &taskSubmissionOutcome{Result: result, Task: task, RelayInfo: relayInfo}, nil
+}
+
+func extractTempImageFilesFromRequest(c *gin.Context) []string {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil
+	}
+	requestBody, err := storage.Bytes()
+	if err != nil {
+		return nil
+	}
+	if !gjson.ValidBytes(requestBody) {
+		return nil
+	}
+
+	var urls []string
+	for _, path := range []string{"image", "image_url", "first_frame_image_url"} {
+		if v := gjson.GetBytes(requestBody, path); v.Exists() && v.Type == gjson.String && v.String() != "" {
+			urls = append(urls, v.String())
+		}
+	}
+	for _, arrPath := range []string{"images", "extra_body.image"} {
+		arr := gjson.GetBytes(requestBody, arrPath)
+		if arr.IsArray() {
+			arr.ForEach(func(_, v gjson.Result) bool {
+				if v.Type == gjson.String && v.String() != "" {
+					urls = append(urls, v.String())
+				}
+				return true
+			})
+		}
+	}
+
+	var files []string
+	seen := make(map[string]struct{})
+	for _, u := range urls {
+		localPath := uploadURLToLocalPath(u)
+		if localPath == "" {
+			continue
+		}
+		if _, ok := seen[localPath]; ok {
+			continue
+		}
+		seen[localPath] = struct{}{}
+		files = append(files, localPath)
+	}
+	return files
+}
+
+func uploadURLToLocalPath(imageURL string) string {
+	u, err := url.Parse(imageURL)
+	if err != nil {
+		return ""
+	}
+	if !strings.HasPrefix(u.Path, "/uploads/") {
+		return ""
+	}
+	relPath := strings.TrimPrefix(u.Path, "/uploads/")
+	return filepath.Join("data/uploads", relPath)
 }
 
 func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
@@ -830,6 +909,81 @@ func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}
 	c.JSON(taskErr.StatusCode, taskErr)
+}
+
+// agnesKeyMetaFromContext 读取 distributor 在选 key 时存入的 agnes_keys 池条目。
+func agnesKeyMetaFromContext(c *gin.Context) *model.AgnesKey {
+	value, exists := c.Get(string(constant.ContextKeyAgnesKeyMeta))
+	if !exists {
+		return nil
+	}
+	meta, ok := value.(*model.AgnesKey)
+	if !ok {
+		return nil
+	}
+	return meta
+}
+
+// agnesVideoSecondsForCharge 提取视频任务的计费秒数：优先取阶梯计费快照中的
+// usage facts（提交前 extractUsage 已归一化）；快照缺失时回退解析请求体的
+// num_frames/frame_rate（帧率缺省 24）。有效值 clamp 到 [1, 3600]，解析不出返回 0。
+func agnesVideoSecondsForCharge(c *gin.Context, relayInfo *relaycommon.RelayInfo) float64 {
+	if snapshot := relayInfo.TieredBillingSnapshot; snapshot != nil {
+		if facts := snapshot.UsageFacts; facts != nil {
+			if value, ok := facts["seconds"].(float64); ok && value > 0 {
+				return clampAgnesSeconds(value)
+			}
+		}
+	}
+	if storage, err := common.GetBodyStorage(c); err == nil {
+		if requestBody, err := storage.Bytes(); err == nil {
+			if _, seekErr := storage.Seek(0, io.SeekStart); seekErr == nil {
+				c.Request.Body = io.NopCloser(storage)
+			}
+			if gjson.ValidBytes(requestBody) {
+				if duration := gjson.GetBytes(requestBody, "duration"); duration.Exists() && duration.Float() > 0 {
+					return clampAgnesSeconds(duration.Float())
+				}
+				frames := gjson.GetBytes(requestBody, "num_frames")
+				if frames.Exists() && frames.Float() > 0 {
+					frameRate := 24.0
+					if rate := gjson.GetBytes(requestBody, "frame_rate"); rate.Exists() && rate.Float() > 0 {
+						frameRate = rate.Float()
+					}
+					return clampAgnesSeconds(frames.Float() / frameRate)
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// clampAgnesSeconds 与 agnes 插件 extractUsage 的计费边界一致：秒数夹在 [1, 3600]，
+// 非正值表示无法计费，返回 0（由调用方跳过入账）。
+func clampAgnesSeconds(seconds float64) float64 {
+	if seconds <= 0 {
+		return 0
+	}
+	if seconds < 1 {
+		return 1
+	}
+	if seconds > 3600 {
+		return 3600
+	}
+	return seconds
+}
+
+// agnesRefundVideoSecondsForTask 撤销已入账但任务未持久化的 agnes 秒数（insert 失败路径）。
+func agnesRefundVideoSecondsForTask(task *model.Task) {
+	if task.PrivateData.AgnesKeyID == 0 || task.PrivateData.AgnesKeySeconds <= 0 {
+		return
+	}
+	if err := model.AgnesRefundVideoSeconds(task.PrivateData.AgnesKeyID, task.PrivateData.AgnesKeySeconds); err != nil {
+		logger.LogError(nil, fmt.Sprintf("agnes_keys refund on insert failure failed: task=%s key_id=%d err=%v",
+			task.TaskID, task.PrivateData.AgnesKeyID, err))
+	}
+	task.PrivateData.AgnesKeyID = 0
+	task.PrivateData.AgnesKeySeconds = 0
 }
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *taskdto.TaskError, retryTimes int) bool {

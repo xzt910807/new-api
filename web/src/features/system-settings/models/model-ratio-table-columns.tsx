@@ -22,6 +22,7 @@ import { DataTableColumnHeader } from '@/components/data-table/core/column-heade
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { StatusBadge } from '@/components/status-badge'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 
 import {
   getModeLabel,
@@ -44,6 +45,7 @@ const filterBySelectedValues = (
 type BuildModelRatioColumnsOptions = {
   onDelete: (name: string) => void
   onEdit: (model: ModelRow) => void
+  onMembershipFreeChange?: (name: string, enabled: boolean) => void
   deleteDisabled?: boolean
   taskModelNames?: Set<string>
   t: (key: string) => string
@@ -52,6 +54,7 @@ type BuildModelRatioColumnsOptions = {
 export function buildModelRatioColumns({
   onDelete,
   onEdit,
+  onMembershipFreeChange,
   deleteDisabled,
   taskModelNames,
   t,
@@ -94,10 +97,19 @@ export function buildModelRatioColumns({
         const showTieredBadge =
           row.original.billingMode === 'tiered_expr' && !isTaskModel
         const showUnconfiguredTaskBadge = isTaskModel && !hasConfiguredTaskPricing
+        const showMembershipFreeBadge = row.original.membershipFree === true
 
         return (
           <div className='flex min-w-0 items-center gap-2 font-medium'>
             <span className='min-w-0 truncate'>{row.getValue('name')}</span>
+            {showMembershipFreeBadge ? (
+              <StatusBadge
+                label={t('Membership free')}
+                variant='warning'
+                copyable={false}
+                className='shrink-0'
+              />
+            ) : null}
             {showTieredBadge ? (
               <StatusBadge
                 label={t('Tiered')}
@@ -134,6 +146,23 @@ export function buildModelRatioColumns({
         )
       },
       enableHiding: false,
+    },
+    {
+      id: 'membershipFree',
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t('Membership free')} />
+      ),
+      cell: ({ row }) => (
+        <Switch
+          checked={row.original.membershipFree === true}
+          onCheckedChange={(checked) =>
+            onMembershipFreeChange?.(row.original.name, checked === true)
+          }
+          aria-label={t('Membership free')}
+        />
+      ),
+      enableSorting: false,
+      meta: { label: t('Membership free') },
     },
     {
       accessorKey: 'billingMode',

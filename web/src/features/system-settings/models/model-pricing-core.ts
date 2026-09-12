@@ -33,6 +33,7 @@ export const createModelPricingSchema = (t: (key: string) => string) =>
     imageRatio: z.string().optional(),
     audioRatio: z.string().optional(),
     audioCompletionRatio: z.string().optional(),
+    membershipFree: z.boolean().optional(),
   })
 
 export type ModelPricingFormValues = z.infer<
@@ -59,6 +60,7 @@ export type ModelRatioData = {
   imageRatio?: string
   audioRatio?: string
   audioCompletionRatio?: string
+  membershipFree?: boolean
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
@@ -217,9 +219,16 @@ export function buildPreviewRows(
   laneEnabled: Record<LaneKey, boolean>,
   t: (key: string) => string
 ): PreviewRow[] {
+  const membershipFreeRow: PreviewRow = {
+    key: 'membershipFree',
+    label: t('Membership free'),
+    value: values.membershipFree === true ? t('Enabled') : t('Disabled'),
+  }
+
   if (mode === 'tiered_expr') {
     const effectiveExpr = combineBillingExpr(billingExpr, requestRuleExpr)
     return [
+      membershipFreeRow,
       { key: 'mode', label: 'BillingMode', value: 'tiered_expr' },
       {
         key: 'expr',
@@ -232,6 +241,7 @@ export function buildPreviewRows(
 
   if (mode === 'per-request') {
     return [
+      membershipFreeRow,
       {
         key: 'price',
         label: 'ModelPrice',
@@ -241,6 +251,7 @@ export function buildPreviewRows(
   }
 
   return [
+    membershipFreeRow,
     {
       key: 'inputPrice',
       label: t('Input price'),

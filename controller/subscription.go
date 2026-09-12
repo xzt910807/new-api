@@ -171,6 +171,9 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 	if req.Plan.AllowWalletOverflow == nil {
 		req.Plan.AllowWalletOverflow = common.GetPointer(true)
 	}
+	if req.Plan.IsMembership {
+		req.Plan.TotalAmount = 0
+	}
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -295,6 +298,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"creem_product_id":           req.Plan.CreemProductId,
 			"waffo_pancake_product_id":   req.Plan.WaffoPancakeProductId,
 			"max_purchase_per_user":      req.Plan.MaxPurchasePerUser,
+			"is_membership":              req.Plan.IsMembership,
 			"total_amount":               req.Plan.TotalAmount,
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"downgrade_group":            req.Plan.DowngradeGroup,

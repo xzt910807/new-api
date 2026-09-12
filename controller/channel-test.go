@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -82,13 +83,15 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		constant.ChannelTypeJimeng,
 		constant.ChannelTypeDoubaoVideo,
 		constant.ChannelTypeVidu,
-		constant.ChannelTypeTaskPlugin,
 	}
 	if lo.Contains(unsupportedTestChannelTypes, channel.Type) {
 		channelTypeName := constant.GetChannelTypeName(channel.Type)
 		return testResult{
 			localErr: fmt.Errorf("%s channel test is not supported", channelTypeName),
 		}
+	}
+	if channel.Type == constant.ChannelTypeTaskPlugin {
+		return testTaskPluginChannel(ctx, channel, testUserID, testModel)
 	}
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -135,6 +138,11 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 
 		// VolcEngine 图像生成模型
 		if channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(testModel, "seedream") {
+			requestPath = "/v1/images/generations"
+		}
+
+		// 通用图像生成模型（dall-e / gpt-image / imagen / flux / agnes-image 等）
+		if common.IsImageGenerationModel(testModel) {
 			requestPath = "/v1/images/generations"
 		}
 
@@ -516,6 +524,125 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 }
 
+// testTaskPluginChannel 对 Task Plugin 渠道执行一次真实的任务提交测试，
+// 与生产链路（POST /v1/videos 的 openai_video 协议端点）保持一致：先经
+// PinTaskPluginEndpoint / PrepareTaskPluginEndpoint 中间件完成插件路由与
+// 请求解析，再锁定被测渠道走完整的提交、计费与落库链路。提交成功即视为
+// 渠道可用；测试产生的任务与计费与真实请求完全相同。
+func testTaskPluginChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string) testResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	testModel = strings.TrimSpace(testModel)
+	if testModel == "" {
+		if channel.TestModel != nil && *channel.TestModel != "" {
+			testModel = strings.TrimSpace(*channel.TestModel)
+		} else {
+			models := channel.GetModels()
+			if len(models) > 0 {
+				testModel = strings.TrimSpace(models[0])
+			}
+		}
+		if testModel == "" {
+			return testResult{
+				localErr: errors.New("task plugin channel has no test model configured"),
+			}
+		}
+	}
+
+	// num_frames=81 是多数视频插件的最小合法时长，测试费用最低
+	testBody, err := common.Marshal(map[string]any{
+		"model":      testModel,
+		"prompt":     "a cute cat",
+		"num_frames": 81,
+	})
+	if err != nil {
+		return testResult{localErr: err}
+	}
+	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/videos", bytes.NewReader(testBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	cache, err := model.GetUserCache(testUserID)
+	if err != nil {
+		return testResult{localErr: err}
+	}
+	cache.WriteContext(c)
+	c.Set("id", testUserID)
+	group, _ := model.GetUserGroup(testUserID, false)
+	c.Set("group", group)
+
+	middleware.PinTaskPluginEndpoint()(c)
+	if c.IsAborted() {
+		return testResult{context: c, localErr: testTaskPluginMiddlewareError(w)}
+	}
+	middleware.PrepareTaskPluginEndpoint()(c)
+	if c.IsAborted() {
+		return testResult{context: c, localErr: testTaskPluginMiddlewareError(w)}
+	}
+	if _, claimed := c.Get(pluginruntime.ContextKeyPinnedEndpoint); !claimed {
+		return testResult{
+			context:  c,
+			localErr: fmt.Errorf("model %s is not served by any task plugin", testModel),
+		}
+	}
+
+	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
+	if newAPIError != nil {
+		return testResult{
+			context:     c,
+			localErr:    newAPIError,
+			newAPIError: newAPIError,
+		}
+	}
+
+	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
+	if err != nil {
+		return testResult{
+			context:     c,
+			localErr:    err,
+			newAPIError: types.NewError(err, types.ErrorCodeGenRelayInfoFailed),
+		}
+	}
+	if action := c.GetString("task_action"); action != "" {
+		relayInfo.Action = action
+	}
+	// 锁定被测渠道：渠道测试不应在重试时漂移到其他渠道
+	relayInfo.LockedChannel = channel
+
+	common.SysLog(fmt.Sprintf("testing task plugin channel %d with model %s", channel.Id, testModel))
+
+	outcome, taskErr := executeTaskSubmission(c, relayInfo)
+	if taskErr != nil {
+		err := taskErr.Error
+		if err == nil {
+			err = errors.New(taskErr.Message)
+		}
+		return testResult{
+			context:  c,
+			localErr: err,
+		}
+	}
+	if outcome != nil && outcome.Task != nil {
+		common.SysLog(fmt.Sprintf("task plugin channel %d test submitted task %s", channel.Id, outcome.Task.TaskID))
+	}
+	return testResult{
+		context:     c,
+		localErr:    nil,
+		newAPIError: nil,
+	}
+}
+
+// testTaskPluginMiddlewareError 提取任务插件端点中间件写入的错误消息。
+func testTaskPluginMiddlewareError(w *httptest.ResponseRecorder) error {
+	if message := detectErrorMessageFromJSONBytes(w.Body.Bytes()); message != "" {
+		return fmt.Errorf("upstream error: %s", message)
+	}
+	return errors.New(strings.TrimSpace(w.Body.String()))
+}
+
 func attachTestBillingRequestInput(info *relaycommon.RelayInfo, request dto.Request) error {
 	if info == nil {
 		return nil
@@ -782,6 +909,16 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			Query:     "What is Deep Learning?",
 			Documents: []any{"Deep Learning is a subset of machine learning.", "Machine learning is a field of artificial intelligence."},
 			TopN:      lo.ToPtr(2),
+		}
+	}
+
+	// 通用图像生成模型（dall-e / gpt-image / imagen / flux / agnes-image 等）
+	if common.IsImageGenerationModel(model) {
+		return &dto.ImageRequest{
+			Model:  model,
+			Prompt: "a cute cat",
+			N:      lo.ToPtr(uint(1)),
+			Size:   "1024x1024",
 		}
 	}
 
@@ -1105,6 +1242,10 @@ func selectChannelsForAutomaticTest(channels []*model.Channel, mode string) []*m
 	selected := make([]*model.Channel, 0, len(channels))
 	for _, channel := range channels {
 		if channel.Status == common.ChannelStatusManuallyDisabled {
+			continue
+		}
+		// Task Plugin 渠道测试会真实提交计费任务，自动健康检查跳过
+		if channel.Type == constant.ChannelTypeTaskPlugin {
 			continue
 		}
 		if mode == operation_setting.ChannelTestModeAutoBanOnly && !channel.GetAutoBan() {

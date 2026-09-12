@@ -538,6 +538,7 @@ func TestPrepareMidjourneyTaskBillingKeepsUnbilledMarkerClear(t *testing.T) {
 	assert.Zero(t, task.Quota)
 	assert.Zero(t, task.TokenId)
 	assert.Zero(t, task.BillingChannelId)
+	assert.False(t, task.MembershipFree)
 }
 
 func TestSettleMidjourneyTaskBillingRequiresPersistedTask(t *testing.T) {
@@ -809,6 +810,107 @@ func TestRefundMidjourneyQuotaUsesLegacyChannelFallbackWithoutTokenAdjustment(t 
 	assert.Zero(t, log.TokenId)
 }
 
+func TestPrepareMidjourneyTaskBillingMembershipFreeKeepsFundingUntouched(t *testing.T) {
+	truncate(t)
+
+	const userID, tokenID, channelID = 55, 55, 55
+	const initialUserQuota, initialTokenQuota, originalQuota = 10000, 5000, 3000
+	seedUser(t, userID, initialUserQuota)
+	seedToken(t, tokenID, userID, "sk-midjourney-membership", initialTokenQuota)
+	seedChannel(t, channelID)
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                userID,
+		TokenId:               tokenID,
+		TokenKey:              "sk-midjourney-membership",
+		UserQuota:             initialUserQuota,
+		IsMembershipFreeModel: true,
+		// 会员免费优先于订阅检查：免费请求不涉及任何资金来源。
+		BillingSource: BillingSourceSubscription,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: channelID,
+		},
+	}
+	task := &model.Midjourney{UserId: userID, MjId: "mj-membership-free", ChannelId: channelID, Quota: 900, TokenId: 7, BillingChannelId: 8}
+
+	prepared, err := PrepareMidjourneyTaskBilling(relayInfo, task, originalQuota, true)
+
+	require.NoError(t, err)
+	assert.False(t, prepared)
+	// quota 仅作统计回滚标记持久化，其余 legacy 计费标记不携带资金语义。
+	assert.Equal(t, originalQuota, task.Quota)
+	assert.True(t, task.MembershipFree)
+	assert.Zero(t, task.TokenId)
+	assert.Equal(t, channelID, task.BillingChannelId)
+
+	require.NoError(t, task.Insert())
+	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	require.NoError(t, err)
+	assert.False(t, billed)
+	// 免费任务全程不碰资金、令牌与统计。
+	assert.Equal(t, initialUserQuota, getUserQuota(t, userID))
+	assert.Equal(t, initialTokenQuota, getTokenRemainQuota(t, tokenID))
+	assert.Zero(t, getTokenUsedQuota(t, tokenID))
+	usedQuota, requestCount := getUserUsageAccounting(t, userID)
+	assert.Zero(t, usedQuota)
+	assert.Zero(t, requestCount)
+	assert.Zero(t, getChannelUsedQuota(t, channelID))
+	assert.Zero(t, countLogs(t))
+
+	persisted := getMidjourneyTask(t, task.Id)
+	assert.True(t, persisted.MembershipFree)
+	assert.Equal(t, originalQuota, persisted.Quota)
+}
+
+func TestRefundMidjourneyQuotaMembershipFreeRollsBackStatsOnly(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 56, 56, 56
+	const initialUserQuota, initialTokenQuota, originalQuota = 10000, 5000, 3000
+	seedUser(t, userID, initialUserQuota)
+	seedToken(t, tokenID, userID, "sk-midjourney-membership-refund", initialTokenQuota)
+	seedChannel(t, channelID)
+
+	task := &model.Midjourney{
+		UserId:          userID,
+		MjId:            "mj-membership-refund",
+		Action:          "IMAGINE",
+		ChannelId:       channelID,
+		BillingChannelId: channelID,
+		Quota:           originalQuota,
+		MembershipFree:  true,
+		Progress:        "0%",
+	}
+	require.NoError(t, task.Insert())
+
+	// 模拟提交阶段记入的统计用量（免费任务未动资金与令牌额度）。
+	seedChargedAccounting(t, userID, channelID, 0, originalQuota, 1)
+
+	assert.True(t, RefundMidjourneyQuota(ctx, task, "构图失败"))
+
+	// 资金与令牌额度从未被扣减，保持原值。
+	assert.Equal(t, initialUserQuota, getUserQuota(t, userID))
+	assert.Equal(t, initialTokenQuota, getTokenRemainQuota(t, tokenID))
+	assert.Zero(t, getTokenUsedQuota(t, tokenID))
+	// 统计用量对称回减，请求数保留（与普通退款路径一致）。
+	usedQuota, requestCount := getUserUsageAccounting(t, userID)
+	assert.Zero(t, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Zero(t, getChannelUsedQuota(t, channelID))
+	// 免费任务退款不产生退款日志。
+	assert.Zero(t, countLogs(t))
+
+	persisted := getMidjourneyTask(t, task.Id)
+	assert.Zero(t, persisted.Quota)
+	assert.True(t, persisted.MembershipFree)
+
+	// quota 已清零，重复退款幂等且不产生副作用。
+	assert.True(t, RefundMidjourneyQuota(ctx, task, "duplicate poll"))
+	assert.Equal(t, initialUserQuota, getUserQuota(t, userID))
+	assert.Zero(t, countLogs(t))
+}
+
 // ===========================================================================
 // RefundTaskQuota tests
 // ===========================================================================
@@ -937,6 +1039,43 @@ func TestRefundTaskQuota_NoToken(t *testing.T) {
 	assert.Zero(t, getTaskQuota(t, task.ID))
 }
 
+func TestRefundTaskQuota_MembershipFreeSkipsFundingRefund(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 6, 6, 6
+	const initQuota, preConsumed = 10000, 2000
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-membership-free", tokenRemain)
+	seedChannel(t, channelID)
+	// 提交阶段 LogTaskConsumption 记录了原价统计用量（资金实际未扣）
+	seedChargedAccounting(t, userID, channelID, tokenID, preConsumed, 1)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.MembershipFree = true
+	require.NoError(t, model.DB.Create(task).Error)
+
+	assert.True(t, RefundTaskQuota(ctx, task, "membership free task failed"))
+
+	// 资金与令牌从未预扣，不得退款（防止双重退款）
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, preConsumed, getTokenUsedQuota(t, tokenID))
+
+	// 统计用量对称回减，持久化标记清零
+	usedQuota, requestCount := getUserUsageAccounting(t, userID)
+	assert.Zero(t, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Zero(t, getChannelUsedQuota(t, channelID))
+	assert.Zero(t, task.Quota)
+	assert.Zero(t, getTaskQuota(t, task.ID))
+
+	// 无退款日志：没有真实资金退款，不产生 LogTypeRefund
+	assert.Equal(t, int64(0), countLogs(t))
+}
+
 func TestRefundTaskQuota_FundingFailureKeepsAccountingAndPendingMarker(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
@@ -963,6 +1102,36 @@ func TestRefundTaskQuota_FundingFailureKeepsAccountingAndPendingMarker(t *testin
 // ===========================================================================
 // RecalculateTaskQuota tests
 // ===========================================================================
+
+func TestRecalculate_MembershipFreeSkipsSettlement(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 11, 11, 11
+	const initQuota, preConsumed = 10000, 2000
+	const actualQuota = 3000
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-recalc-membership", tokenRemain)
+	seedChannel(t, channelID)
+	seedChargedAccounting(t, userID, channelID, tokenID, preConsumed, 1)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.MembershipFree = true
+	require.NoError(t, model.DB.Create(task).Error)
+
+	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
+
+	// 提交时已按 0 结算，重算差额不得对会员免费任务收费或退款
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, preConsumed, getTokenUsedQuota(t, tokenID))
+	usedQuota, _ := getUserUsageAccounting(t, userID)
+	assert.Equal(t, preConsumed, usedQuota)
+	assert.Equal(t, preConsumed, task.Quota)
+	assert.Equal(t, int64(0), countLogs(t))
+}
 
 func TestRecalculate_PositiveDelta(t *testing.T) {
 	truncate(t)

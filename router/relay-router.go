@@ -66,6 +66,18 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		playgroundRouter.POST("/chat/completions", controller.Playground)
 	}
+
+	// Task playground uses PrepareTaskPluginSubmit before Distribute so the
+	// pinned plugin and expected_task_plugin_key are available for channel
+	// matching.
+	playgroundTaskRouter := router.Group("/pg/tasks")
+	playgroundTaskRouter.Use(middleware.RouteTag("relay"))
+	playgroundTaskRouter.Use(middleware.SystemPerformanceCheck())
+	playgroundTaskRouter.Use(middleware.UserAuth(), middleware.PrepareTaskPluginSubmit(), middleware.Distribute())
+	{
+		playgroundTaskRouter.POST("/:key", controller.PlaygroundTask)
+	}
+
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())

@@ -117,11 +117,38 @@ function SubscriptionBadge(props: { quota: number }) {
   )
 }
 
+function MembershipFreeBadge(props: { quota: number }) {
+  const { t } = useTranslation()
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <StatusBadge
+            label={t('Membership free')}
+            variant='success'
+            size='sm'
+            copyable={false}
+            className='cursor-help'
+          />
+        }
+      />
+      <TooltipContent>
+        <span>
+          {t('Original price')}: {formatLogQuota(props.quota)}
+        </span>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function LogCostDisplay(props: LogCostDisplayProps) {
-  const isSubscription = props.other?.billing_source === 'subscription'
+  const isMembershipFree = props.other?.membership_free === true
+  const isSubscription =
+    !isMembershipFree && props.other?.billing_source === 'subscription'
   const showToolSurcharge = hasToolSurcharge(props.other)
 
-  if (!isSubscription && !showToolSurcharge) {
+  if (!isMembershipFree && !isSubscription && !showToolSurcharge) {
     return (
       <div className='flex flex-col gap-0.5'>
         <QuotaBadge quota={props.quota} />
@@ -132,7 +159,9 @@ export function LogCostDisplay(props: LogCostDisplayProps) {
   return (
     <TooltipProvider>
       <div className='inline-flex items-center gap-1'>
-        {isSubscription ? (
+        {isMembershipFree ? (
+          <MembershipFreeBadge quota={props.quota} />
+        ) : isSubscription ? (
           <SubscriptionBadge quota={props.quota} />
         ) : (
           <QuotaBadge quota={props.quota} />

@@ -11,7 +11,11 @@ import (
 )
 
 type ChannelSettings struct {
-	TaskPluginKey          string `json:"task_plugin_key,omitempty"`
+	TaskPluginKey string `json:"task_plugin_key,omitempty"`
+	// KeyProvider selects where the channel resolves its upstream API key:
+	// empty means the channel's own key field; "agnes_keys" resolves keys from
+	// the operator-maintained agnes_keys pool table with per-day quotas.
+	KeyProvider            string `json:"key_provider,omitempty"`
 	ForceFormat            bool   `json:"force_format,omitempty"`
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
 	Proxy                  string `json:"proxy"`
@@ -25,6 +29,10 @@ type ChannelSettings struct {
 	// (1-8). Zero/unset means 1. Ignored when HTTPProtocol is "http1".
 	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
 }
+
+// KeyProviderAgnesKeys marks a channel whose upstream keys are resolved from
+// the agnes_keys pool table (legacy proxy.py scheduling semantics).
+const KeyProviderAgnesKeys = "agnes_keys"
 
 const (
 	HTTPProtocolAuto         = "auto"

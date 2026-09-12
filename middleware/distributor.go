@@ -640,6 +640,10 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
+	if channel.GetSetting().KeyProvider == dto.KeyProviderAgnesKeys {
+		return setupAgnesKeysChannel(c, channel)
+	}
+
 	key, index, newAPIError := channel.GetNextEnabledKey()
 	if newAPIError != nil {
 		return newAPIError
@@ -677,6 +681,100 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		c.Set("bot_id", channel.Other)
 	}
 	return nil
+}
+
+// setupAgnesKeysChannel 为 key_provider=agnes_keys 的渠道从 agnes_keys 密钥池
+// 解析上游密钥（沿用 proxy.py 的调度语义）：按请求路径归类配额类别，文本/图片
+// 在选 key 时原子扣次（图片按 n 张数），视频只选不扣——秒数在任务提交成功后由
+// 提交链路入账，失败时退回。选中密钥经 ContextKeyChannelKey 下发，重试、日志
+// 与审计链路与普通渠道完全一致。
+func setupAgnesKeysChannel(c *gin.Context, channel *model.Channel) *types.NewAPIError {
+	if c.Request == nil || c.Request.URL == nil {
+		return types.NewError(errors.New("agnes_keys 渠道需要可用的请求上下文"), types.ErrorCodeChannelNoAvailableKey)
+	}
+	kind := agnesKeyKindForPath(c)
+	count := 1
+	if kind == model.AgnesKeyKindImage {
+		count = agnesImageCountFromBody(c)
+	}
+	agnesKey, err := model.AgnesAcquireKey(kind, count, channel.GetBaseURL())
+	if err != nil {
+		logger.LogError(c, fmt.Sprintf("agnes_keys acquire failed: channel=%s kind=%s count=%d err=%v", channel.Name, kind, count, err))
+		return types.NewError(err, types.ErrorCodeChannelNoAvailableKey)
+	}
+	common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, false)
+	common.SetContextKey(c, constant.ContextKeyChannelKey, agnesKey.ApiKey)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())
+	common.SetContextKey(c, constant.ContextKeyAgnesKeyMeta, &model.AgnesKey{Id: agnesKey.Id, ApiKey: agnesKey.ApiKey})
+	return nil
+}
+
+// agnesKeyKindForPath 按请求路径归类 agnes_keys 配额类别：
+// 图片生成路径 → image，视频提交路径 → video，Task Plugin 提交路径按请求体推断，
+// 其余（含对话/embedding）→ text。
+func agnesKeyKindForPath(c *gin.Context) string {
+	path := c.Request.URL.Path
+	switch {
+	case strings.Contains(path, "/images/"):
+		return model.AgnesKeyKindImage
+	case strings.Contains(path, "/videos"), strings.Contains(path, "/video/generations"):
+		return model.AgnesKeyKindVideo
+	case strings.Contains(path, "/tasks/"):
+		return agnesTaskKeyKindFromBody(c)
+	default:
+		return model.AgnesKeyKindText
+	}
+}
+
+// agnesTaskKeyKindFromBody 对 Task Plugin 提交路径（/pg/tasks/:key 或 /v1/tasks/:key）
+// 按请求体推断配额类别：duration/num_frames → video，n → image，其余默认 video。
+func agnesTaskKeyKindFromBody(c *gin.Context) string {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return model.AgnesKeyKindVideo
+	}
+	requestBody, err := storage.Bytes()
+	if err != nil || !gjson.ValidBytes(requestBody) {
+		return model.AgnesKeyKindVideo
+	}
+	if _, seekErr := storage.Seek(0, io.SeekStart); seekErr == nil {
+		c.Request.Body = io.NopCloser(storage)
+	}
+	if duration := gjson.GetBytes(requestBody, "duration"); duration.Exists() && duration.Float() > 0 {
+		return model.AgnesKeyKindVideo
+	}
+	if numFrames := gjson.GetBytes(requestBody, "num_frames"); numFrames.Exists() && numFrames.Float() > 0 {
+		return model.AgnesKeyKindVideo
+	}
+	if n := gjson.GetBytes(requestBody, "n"); n.Exists() && n.Int() > 0 {
+		return model.AgnesKeyKindImage
+	}
+	return model.AgnesKeyKindVideo
+}
+
+// agnesImageCountFromBody 读取图片请求的 n 参数（生成张数），缺省/非法时回退 1。
+// 读取后复位 body 存储，保证后续 relay 层可再次读取。
+func agnesImageCountFromBody(c *gin.Context) int {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return 1
+	}
+	requestBody, err := storage.Bytes()
+	if err != nil || !gjson.ValidBytes(requestBody) {
+		return 1
+	}
+	if _, seekErr := storage.Seek(0, io.SeekStart); seekErr == nil {
+		c.Request.Body = io.NopCloser(storage)
+	}
+	n := gjson.GetBytes(requestBody, "n")
+	if !n.Exists() {
+		return 1
+	}
+	count := int(n.Int())
+	if count < 1 {
+		return 1
+	}
+	return count
 }
 
 // extractModelNameFromGeminiPath 从 Gemini API URL 路径中提取模型名

@@ -1015,9 +1015,9 @@ func (a *TaskAdaptor) buildSubmit(c *gin.Context, info *relaycommon.RelayInfo) (
 	if method == "" {
 		method = http.MethodPost
 	}
-	logger.LogDebug(
-		c,
-		"task_plugin subsystem=adaptor event=build_submit_complete plugin=%q method=%q body_type=%q parts=%d model=%q action_present=%t rewrite_model=%t elapsed_ms=%d",
+	bodySummary := summarizeRequestBody(descriptor.Body)
+	common.SysLog(fmt.Sprintf(
+		"task_plugin subsystem=adaptor event=build_submit_complete plugin=%q method=%q body_type=%q parts=%d model=%q action_present=%t rewrite_model=%t base_url=%q body_summary=%q elapsed_ms=%d",
 		a.plugin.Meta.Key,
 		method,
 		descriptor.BodyType,
@@ -1025,8 +1025,10 @@ func (a *TaskAdaptor) buildSubmit(c *gin.Context, info *relaycommon.RelayInfo) (
 		info.OriginModelName,
 		info.Action != "",
 		descriptor.RewriteModel != "",
+		info.ChannelBaseUrl,
+		bodySummary,
 		time.Since(started).Milliseconds(),
-	)
+	))
 	return a.submit, nil
 }
 
@@ -1428,3 +1430,28 @@ var _ channel.TaskContentRequestProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskUsageFactsProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskValidatedBillingProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskValidatedUsageFactsProvider = (*TaskAdaptor)(nil)
+
+func summarizeRequestBody(body any) string {
+	if body == nil {
+		return ""
+	}
+	var text string
+	if bodyText, ok := body.(string); ok {
+		text = bodyText
+	} else {
+		encoded, err := common.Marshal(body)
+		if err != nil {
+			return ""
+		}
+		text = string(encoded)
+	}
+	const maxLen = 2048
+	return truncateString(text, maxLen)
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "...(truncated)"
+}

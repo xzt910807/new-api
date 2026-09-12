@@ -52,8 +52,8 @@ export function PublicNavigation({
   return (
     <nav className={cn('hidden items-center gap-1 md:flex', className)}>
       {links.map((link, index) => {
-        // Handle external links
-        if (link.external) {
+        // Handle external links and new-tab links
+        if (link.external || link.newTab) {
           return (
             <a
               key={index}

@@ -37,6 +37,10 @@ export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
+  USER_TASK_MODELS: '/api/user/task-models',
+  UPLOAD_FILES: '/api/upload',
+  TASK_SUBMIT: '/pg/tasks',
+  USER_TASKS: '/api/task/self',
 } as const
 
 // Default group — uses 'default' as the safe fallback; auto-group is

@@ -154,7 +154,9 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.settled || s.refunded || s.trusted || targetQuota <= s.preConsumedQuota {
+	// 会员免费请求不预扣任何资金，否则提交阶段扣款、结算阶段退款的中间态
+	// 在异常路径（如进程崩溃、异步退款）下会凭空产生扣费或双重退款。
+	if s.settled || s.refunded || s.trusted || s.relayInfo.IsMembershipFreeModel || targetQuota <= s.preConsumedQuota {
 		return nil
 	}
 
@@ -367,17 +369,19 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		}
-		if userQuota <= 0 {
-			return nil, types.NewErrorWithStatusCode(
-				fmt.Errorf("用户额度不足, 剩余额度: %s", logger.FormatQuota(userQuota)),
-				types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
-				types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
-		}
-		if userQuota-preConsumedQuota < 0 {
-			return nil, types.NewErrorWithStatusCode(
-				fmt.Errorf("预扣费额度失败, 用户剩余额度: %s, 需要预扣费额度: %s", logger.FormatQuota(userQuota), logger.FormatQuota(preConsumedQuota)),
-				types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
-				types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		if !relayInfo.IsMembershipFreeModel {
+			if userQuota <= 0 {
+				return nil, types.NewErrorWithStatusCode(
+					fmt.Errorf("用户额度不足, 剩余额度: %s", logger.FormatQuota(userQuota)),
+					types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
+					types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			}
+			if userQuota-preConsumedQuota < 0 {
+				return nil, types.NewErrorWithStatusCode(
+					fmt.Errorf("预扣费额度失败, 用户剩余额度: %s, 需要预扣费额度: %s", logger.FormatQuota(userQuota), logger.FormatQuota(preConsumedQuota)),
+					types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
+					types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			}
 		}
 		relayInfo.UserQuota = userQuota
 
@@ -411,6 +415,12 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			return nil, apiErr
 		}
 		return session, nil
+	}
+
+	// Membership-free requests bypass subscription funding to avoid consuming
+	// subscription quota for models included in the membership plan.
+	if relayInfo.IsMembershipFreeModel {
+		return tryWallet()
 	}
 
 	switch pref {

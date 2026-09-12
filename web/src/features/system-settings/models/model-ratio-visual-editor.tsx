@@ -81,6 +81,7 @@ type ModelRatioVisualEditorProps = {
   savedAudioCompletionRatio: string
   savedBillingMode: string
   savedBillingExpr: string
+  savedMembershipFreeModels: string
   modelPrice: string
   modelRatio: string
   cacheRatio: string
@@ -91,6 +92,7 @@ type ModelRatioVisualEditorProps = {
   audioCompletionRatio: string
   billingMode: string
   billingExpr: string
+  membershipFreeModels: string
   candidateModelNames?: string[]
   candidateModelsLoading?: boolean
   filterMode?: 'all' | 'unset'
@@ -120,6 +122,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioCompletionRatio,
     savedBillingMode,
     savedBillingExpr,
+    savedMembershipFreeModels,
     modelPrice,
     modelRatio,
     cacheRatio,
@@ -130,6 +133,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     audioCompletionRatio,
     billingMode,
     billingExpr,
+    membershipFreeModels,
     candidateModelNames,
     candidateModelsLoading,
     filterMode = 'all',
@@ -217,6 +221,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       imageRatio: savedImageRatio,
       audioRatio: savedAudioRatio,
       audioCompletionRatio: savedAudioCompletionRatio,
+      membershipFreeModels: savedMembershipFreeModels,
       billingMode: savedBillingMode,
       billingExpr: savedBillingExpr,
     })
@@ -229,6 +234,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       imageRatio,
       audioRatio,
       audioCompletionRatio,
+      membershipFreeModels,
       billingMode,
       billingExpr,
     })
@@ -274,6 +280,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioCompletionRatio,
     savedBillingMode,
     savedBillingExpr,
+    savedMembershipFreeModels,
     modelPrice,
     modelRatio,
     cacheRatio,
@@ -282,6 +289,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     imageRatio,
     audioRatio,
     audioCompletionRatio,
+    membershipFreeModels,
     billingMode,
     billingExpr,
   ])
@@ -330,6 +338,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         imageRatio: editableModel.imageRatio,
         audioRatio: editableModel.audioRatio,
         audioCompletionRatio: editableModel.audioCompletionRatio,
+        membershipFree: editableModel.membershipFree,
         billingMode: editBillingMode,
         billingExpr: editableModel.billingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
@@ -395,6 +404,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         audioCompletionRatio,
         { fallback: {}, silent: true }
       )
+      const membershipFreeMap = safeJsonParse<Record<string, boolean>>(
+        membershipFreeModels,
+        { fallback: {}, silent: true }
+      )
       const billingModeMap = safeJsonParse<Record<string, string>>(
         billingMode,
         { fallback: {}, silent: true }
@@ -412,6 +425,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       delete imageMap[name]
       delete audioMap[name]
       delete audioCompletionMap[name]
+      delete membershipFreeMap[name]
       delete billingModeMap[name]
       delete billingExprMap[name]
 
@@ -425,6 +439,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
       onChange(
         'AudioCompletionRatio',
         JSON.stringify(audioCompletionMap, null, 2)
+      )
+      onChange(
+        'MembershipFreeModels',
+        JSON.stringify(membershipFreeMap, null, 2)
       )
       onChange(
         'billing_setting.billing_mode',
@@ -457,16 +475,36 @@ const ModelRatioVisualEditorComponent = forwardRef<
     ]
   )
 
+  const handleMembershipFreeChange = useCallback(
+    (name: string, enabled: boolean) => {
+      const membershipFreeMap = safeJsonParse<Record<string, boolean>>(
+        membershipFreeModels,
+        { fallback: {}, silent: true }
+      )
+      if (enabled) {
+        membershipFreeMap[name] = true
+      } else {
+        delete membershipFreeMap[name]
+      }
+      onChange(
+        'MembershipFreeModels',
+        JSON.stringify(membershipFreeMap, null, 2)
+      )
+    },
+    [membershipFreeModels, onChange]
+  )
+
   const columns = useMemo(
     () =>
       buildModelRatioColumns({
         onDelete: handleDelete,
         onEdit: handleEdit,
+        onMembershipFreeChange: handleMembershipFreeChange,
         deleteDisabled: filterMode === 'unset',
         taskModelNames,
         t,
       }),
-    [handleEdit, handleDelete, filterMode, t, taskModelNames]
+    [handleEdit, handleDelete, handleMembershipFreeChange, filterMode, t, taskModelNames]
   )
 
   const ensurePageInRange = useCallback((pageCount: number) => {
@@ -536,6 +574,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         audioCompletionRatio,
         { fallback: {}, silent: true }
       )
+      const membershipFreeMap = safeJsonParse<Record<string, boolean>>(
+        membershipFreeModels,
+        { fallback: {}, silent: true }
+      )
       const billingModeMap = safeJsonParse<Record<string, string>>(
         billingMode,
         { fallback: {}, silent: true }
@@ -566,6 +608,12 @@ const ModelRatioVisualEditorComponent = forwardRef<
         delete audioCompletionMap[name]
         delete billingModeMap[name]
         delete billingExprMap[name]
+
+        if (data.membershipFree) {
+          membershipFreeMap[name] = true
+        } else {
+          delete membershipFreeMap[name]
+        }
 
         if (data.billingMode === 'tiered_expr') {
           const combined = combineBillingExpr(
@@ -613,6 +661,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         JSON.stringify(audioCompletionMap, null, 2)
       )
       onChange(
+        'MembershipFreeModels',
+        JSON.stringify(membershipFreeMap, null, 2)
+      )
+      onChange(
         'billing_setting.billing_mode',
         JSON.stringify(billingModeMap, null, 2)
       )
@@ -630,6 +682,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       imageRatio,
       audioRatio,
       audioCompletionRatio,
+      membershipFreeModels,
       billingMode,
       billingExpr,
       onChange,
@@ -768,9 +821,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
               colgroup={
                 <colgroup>
                   <col className='w-9' />
-                  <col className='w-[300px]' />
+                  <col className='w-[260px]' />
+                  <col className='w-[110px]' />
                   <col className='w-[120px]' />
-                  <col className='w-[300px]' />
+                  <col className='w-[260px]' />
                   <col className='w-auto' />
                 </colgroup>
               }
@@ -791,7 +845,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
                   }
                   onClick={(event) => {
                     const target = event.target as HTMLElement
-                    if (target.closest('button, [role="checkbox"]')) return
+                    if (target.closest('button, [role="checkbox"], [role="switch"]')) return
                     handleEdit(row.original)
                   }}
                 />
@@ -871,6 +925,7 @@ export const ModelRatioVisualEditor = memo(
         nextProps.savedAudioCompletionRatio &&
       prevProps.savedBillingMode === nextProps.savedBillingMode &&
       prevProps.savedBillingExpr === nextProps.savedBillingExpr &&
+      prevProps.savedMembershipFreeModels === nextProps.savedMembershipFreeModels &&
       prevProps.modelPrice === nextProps.modelPrice &&
       prevProps.modelRatio === nextProps.modelRatio &&
       prevProps.cacheRatio === nextProps.cacheRatio &&
@@ -879,6 +934,7 @@ export const ModelRatioVisualEditor = memo(
       prevProps.imageRatio === nextProps.imageRatio &&
       prevProps.audioRatio === nextProps.audioRatio &&
       prevProps.audioCompletionRatio === nextProps.audioCompletionRatio &&
+      prevProps.membershipFreeModels === nextProps.membershipFreeModels &&
       prevProps.billingMode === nextProps.billingMode &&
       prevProps.billingExpr === nextProps.billingExpr &&
       prevProps.candidateModelNames === nextProps.candidateModelNames &&

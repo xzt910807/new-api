@@ -189,6 +189,15 @@ export function SubscriptionPlansCard({
 
   const hasActive = activeSubscriptions.length > 0
   const hasAny = allSubscriptions.length > 0
+  const activeMembership = useMemo(() => {
+    const now = Date.now() / 1000
+    return activeSubscriptions.find(
+      (s) =>
+        s.subscription?.is_membership === true &&
+        s.subscription?.status === 'active' &&
+        (s.subscription?.end_time || 0) > now
+    )?.subscription
+  }, [activeSubscriptions])
   const isAvailable = loading || plans.length > 0 || hasAny
   const disablePref = !hasActive
   const isSubPref =
@@ -534,7 +543,14 @@ export function SubscriptionPlansCard({
               const count = planPurchaseCountMap.get(plan.id) || 0
               const reached = limit > 0 && count >= limit
 
+              const isMembershipPlan = plan.is_membership === true
+              const membershipBlocksPurchase =
+                isMembershipPlan && !!activeMembership
+
               const benefits = [
+                isMembershipPlan
+                  ? t('Membership: selected models are free')
+                  : null,
                 `${t('Validity Period')}: ${formatDuration(plan, t)}`,
                 formatResetPeriod(plan, t) !== t('No Reset')
                   ? `${t('Quota Reset')}: ${formatResetPeriod(plan, t)}`
@@ -566,7 +582,14 @@ export function SubscriptionPlansCard({
                           </p>
                         )}
                       </div>
-                      {isPopular && (
+                      <div className='flex shrink-0 flex-wrap items-center gap-1'>
+                        {isMembershipPlan && (
+                          <StatusBadge variant='warning' copyable={false}>
+                            <Sparkles className='h-3 w-3' />
+                            {t('Membership')}
+                          </StatusBadge>
+                        )}
+                        {isPopular && (
                         <StatusBadge
                           variant='info'
                           copyable={false}
@@ -575,7 +598,8 @@ export function SubscriptionPlansCard({
                           <Sparkles className='h-3 w-3' />
                           {t('Recommended')}
                         </StatusBadge>
-                      )}
+                        )}
+                      </div>
                     </div>
 
                     <div className='py-2'>
@@ -609,6 +633,19 @@ export function SubscriptionPlansCard({
                           {t('Purchase limit reached')} ({count}/{limit})
                         </TooltipContent>
                       </Tooltip>
+                    ) : membershipBlocksPurchase ? (
+                      <Tooltip>
+                        <TooltipTrigger render={<div />}>
+                          <Button variant='outline' className='w-full' disabled>
+                            {t('Renew after expiry')}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {t(
+                            'You already have an active membership. You can renew after it expires.'
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
                     ) : (
                       <Button
                         variant='outline'
@@ -618,7 +655,7 @@ export function SubscriptionPlansCard({
                           setPurchaseOpen(true)
                         }}
                       >
-                        {t('Subscribe Now')}
+                        {isMembershipPlan ? t('Get Membership') : t('Subscribe Now')}
                       </Button>
                     )}
                   </CardContent>
@@ -648,6 +685,7 @@ export function SubscriptionPlansCard({
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}
         userQuota={userQuota}
+        activeMembership={activeMembership}
         onPurchaseSuccess={onPurchaseSuccess}
         purchaseLimit={
           selectedPlan?.plan?.max_purchase_per_user

@@ -121,6 +121,10 @@ type RelayInfo struct {
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
 	ForcePreConsume bool
+	// IsMembershipFreeModel is true when the user has an active membership and
+	// the requested model is included in the membership-free model list.
+	// Billing pre-consume and settlement skip actual quota deductions for these requests.
+	IsMembershipFreeModel bool
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 初始免费组可为 nil；若 auto 重试切换到付费组，会在发送前创建。
 	Billing BillingSettler
@@ -884,8 +888,12 @@ type TaskSubmitReq struct {
 	Image          string                 `json:"image,omitempty"`
 	Images         []string               `json:"images,omitempty"`
 	Size           string                 `json:"size,omitempty"`
+	AspectRatio    string                 `json:"aspect_ratio,omitempty"`
+	Resolution     string                 `json:"resolution,omitempty"`
 	Duration       int                    `json:"duration,omitempty"`
 	Seconds        string                 `json:"seconds,omitempty"`
+	NumFrames      int                    `json:"num_frames,omitempty"`
+	FrameRate      int                    `json:"frame_rate,omitempty"`
 	InputReference string                 `json:"input_reference,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -901,8 +909,10 @@ func (t *TaskSubmitReq) HasImage() bool {
 func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 	type Alias TaskSubmitReq
 	aux := &struct {
-		Metadata json.RawMessage `json:"metadata,omitempty"`
-		Duration json.RawMessage `json:"duration,omitempty"`
+		Metadata  json.RawMessage `json:"metadata,omitempty"`
+		Duration  json.RawMessage `json:"duration,omitempty"`
+		NumFrames json.RawMessage `json:"num_frames,omitempty"`
+		FrameRate json.RawMessage `json:"frame_rate,omitempty"`
 		*Alias
 	}{
 		Alias: (*Alias)(t),
@@ -925,6 +935,25 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 			}
 		}
 	}
+
+	parseIntField := func(raw json.RawMessage, target *int) {
+		if len(raw) == 0 {
+			return
+		}
+		var intVal int
+		if err := common.Unmarshal(raw, &intVal); err == nil {
+			*target = intVal
+			return
+		}
+		var strVal string
+		if err := common.Unmarshal(raw, &strVal); err == nil && strVal != "" {
+			if v, err := strconv.Atoi(strVal); err == nil {
+				*target = v
+			}
+		}
+	}
+	parseIntField(aux.NumFrames, &t.NumFrames)
+	parseIntField(aux.FrameRate, &t.FrameRate)
 
 	if len(aux.Metadata) > 0 {
 		var metadataStr string

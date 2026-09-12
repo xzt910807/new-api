@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { AlertTriangle, Save } from 'lucide-react'
+import { AlertTriangle, Crown, Save } from 'lucide-react'
 import {
   forwardRef,
   useCallback,
@@ -61,6 +61,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import {
@@ -181,6 +182,7 @@ export const ModelPricingEditorPanel = forwardRef<
       imageRatio: '',
       audioRatio: '',
       audioCompletionRatio: '',
+      membershipFree: false,
     },
   })
   const watchedValues = form.watch()
@@ -236,6 +238,7 @@ export const ModelPricingEditorPanel = forwardRef<
         imageRatio: editData.imageRatio || '',
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
+        membershipFree: editData.membershipFree === true,
       })
       let nextPricingMode: PricingMode = 'per-token'
       if (editData.billingMode === 'tiered_expr') {
@@ -257,6 +260,7 @@ export const ModelPricingEditorPanel = forwardRef<
         imageRatio: '',
         audioRatio: '',
         audioCompletionRatio: '',
+        membershipFree: false,
       })
       setPricingMode('per-token')
       setBillingExpr('')
@@ -513,6 +517,7 @@ export const ModelPricingEditorPanel = forwardRef<
         imageRatio: values.imageRatio || '',
         audioRatio: values.audioRatio || '',
         audioCompletionRatio: values.audioCompletionRatio || '',
+        membershipFree: values.membershipFree === true,
       }
 
       if (pricingMode === 'tiered_expr') {
@@ -597,6 +602,32 @@ export const ModelPricingEditorPanel = forwardRef<
                         )}
                       </FormDescription>
                       <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='membershipFree'
+                  render={({ field }) => (
+                    <FormItem className='flex flex-row items-center justify-between rounded-lg border p-3'>
+                      <div className='space-y-0.5'>
+                        <FormLabel className='flex items-center gap-2'>
+                          <Crown className='h-4 w-4' />
+                          {t('Membership free')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Active members can use this model without quota deduction.'
+                          )}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value === true}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
                     </FormItem>
                   )}
                 />

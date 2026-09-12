@@ -16,13 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Crown, CalendarClock, Package } from 'lucide-react'
+import { Crown, CalendarClock, Package, Sparkles } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { GroupBadge } from '@/components/group-badge'
+import { StatusBadge } from '@/components/status-badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -46,7 +47,7 @@ import {
   paySubscriptionBalance,
 } from '../../api'
 import { formatDuration, formatResetPeriod } from '../../lib'
-import type { PlanRecord } from '../../types'
+import type { PlanRecord, UserSubscription } from '../../types'
 
 interface PaymentMethod {
   type: string
@@ -65,6 +66,7 @@ interface Props {
   purchaseLimit?: number
   purchaseCount?: number
   userQuota?: number
+  activeMembership?: UserSubscription | null
   onPurchaseSuccess?: () => void | Promise<void>
 }
 
@@ -84,6 +86,15 @@ export function SubscriptionPurchaseDialog(props: Props) {
 
   const plan = props.plan?.plan
   if (!plan) return null
+
+  const isMembershipPlan = plan.is_membership === true
+  const activeMembership = props.activeMembership
+  const hasActiveMembership = !!activeMembership
+  const membershipEndsAt = activeMembership?.end_time
+    ? new Date(activeMembership.end_time * 1000).toLocaleString()
+    : ''
+  const membershipBlocksPurchase =
+    isMembershipPlan && hasActiveMembership
 
   const hasStripe = props.enableStripe && !!plan.stripe_price_id
   const hasCreem = props.enableCreem && !!plan.creem_product_id
@@ -276,8 +287,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
             <span className='text-muted-foreground text-sm'>
               {t('Plan Name')}
             </span>
-            <span className='max-w-[200px] truncate text-sm font-medium'>
+            <span className='flex max-w-[200px] items-center gap-1.5 truncate text-sm font-medium'>
               {plan.title}
+              {isMembershipPlan && (
+                <StatusBadge
+                  label={t('Membership')}
+                  variant='warning'
+                  copyable={false}
+                  className='shrink-0'
+                />
+              )}
             </span>
           </div>
           <div className='flex items-center justify-between'>
@@ -330,6 +349,22 @@ export function SubscriptionPurchaseDialog(props: Props) {
           </Alert>
         )}
 
+        {membershipBlocksPurchase && (
+          <Alert variant='default' className='bg-amber-50/50 border-amber-200'>
+            <Sparkles className='h-4 w-4 text-amber-600' />
+            <AlertDescription className='text-amber-800 text-sm'>
+              {membershipEndsAt
+                ? t(
+                    'You already have an active membership. You can renew after it expires on {{date}}.',
+                    { date: membershipEndsAt }
+                  )
+                : t(
+                    'You already have an active membership. You can renew after it expires.'
+                  )}
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div className='flex flex-col gap-2 rounded-md border p-3'>
           <div className='flex items-center justify-between gap-2 text-xs'>
             <span className='text-muted-foreground'>{t('Required')}</span>
@@ -356,7 +391,11 @@ export function SubscriptionPurchaseDialog(props: Props) {
             variant='outline'
             onClick={handlePayBalance}
             disabled={
-              paying || limitReached || !allowBalancePay || insufficientBalance
+              paying ||
+              limitReached ||
+              !allowBalancePay ||
+              insufficientBalance ||
+              membershipBlocksPurchase
             }
           >
             {t('Pay with Balance')}
@@ -375,7 +414,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     variant='outline'
                     className='flex-1'
                     onClick={handlePayStripe}
-                    disabled={paying || limitReached}
+                    disabled={paying || limitReached || membershipBlocksPurchase}
                   >
                     Stripe
                   </Button>
@@ -385,7 +424,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     variant='outline'
                     className='flex-1'
                     onClick={handlePayCreem}
-                    disabled={paying || limitReached}
+                    disabled={paying || limitReached || membershipBlocksPurchase}
                   >
                     Creem
                   </Button>
@@ -395,7 +434,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     variant='outline'
                     className='flex-1'
                     onClick={handlePayWaffoPancake}
-                    disabled={paying || limitReached}
+                    disabled={paying || limitReached || membershipBlocksPurchase}
                   >
                     Waffo Pancake
                   </Button>
@@ -430,7 +469,12 @@ export function SubscriptionPurchaseDialog(props: Props) {
                 </Select>
                 <Button
                   onClick={handlePayEpay}
-                  disabled={paying || !selectedEpayMethod || limitReached}
+                  disabled={
+                    paying ||
+                    !selectedEpayMethod ||
+                    limitReached ||
+                    membershipBlocksPurchase
+                  }
                 >
                   {t('Pay')}
                 </Button>

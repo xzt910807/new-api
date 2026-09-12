@@ -110,6 +110,20 @@ func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	return tokens, err
 }
 
+// GetUserTokenByName returns the user's first non-deleted token with the given
+// name. It is used by the canvas SSO flow to reuse the dedicated "canvas-sso"
+// token across logins instead of creating duplicates.
+func GetUserTokenByName(userId int, name string) (*Token, error) {
+	if userId == 0 || name == "" {
+		return nil, errors.New("userId 或 name 为空！")
+	}
+	token := Token{}
+	if err := DB.Where("user_id = ? AND name = ?", userId, name).First(&token).Error; err != nil {
+		return nil, err
+	}
+	return &token, nil
+}
+
 // sanitizeLikePattern 校验并清洗用户输入的 LIKE 搜索模式。
 // 规则：
 //  1. 转义 ! 和 _（使用 ! 作为 ESCAPE 字符，兼容 MySQL/PostgreSQL/SQLite）

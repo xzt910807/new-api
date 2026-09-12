@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -34,12 +37,34 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
+	if IsMembershipFreeRequest(relayInfo) {
+		relayInfo.IsMembershipFreeModel = true
+		preConsumedQuota = 0
+	}
 	session, apiErr := NewBillingSession(c, relayInfo, preConsumedQuota)
 	if apiErr != nil {
 		return apiErr
 	}
 	relayInfo.Billing = session
 	return nil
+}
+
+// IsMembershipFreeRequest reports whether the request should be free for an
+// active member. Exported for relay paths that do not go through
+// PreConsumeBilling (e.g. the Midjourney legacy billing chain).
+func IsMembershipFreeRequest(relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil || relayInfo.UserId <= 0 {
+		return false
+	}
+	if !setting.IsModelMembershipFree(relayInfo.OriginModelName) {
+		return false
+	}
+	hasMembership, err := model.HasActiveUserMembership(relayInfo.UserId)
+	if err != nil {
+		common.SysLog("error checking active membership: " + err.Error())
+		return false
+	}
+	return hasMembership
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +74,9 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 // SettleBilling 执行计费结算。如果 RelayInfo 上有 BillingSession 则通过 session 结算，
 // 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
 func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
+	if relayInfo != nil && relayInfo.IsMembershipFreeModel {
+		actualQuota = 0
+	}
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed

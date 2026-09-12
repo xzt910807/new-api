@@ -395,6 +395,12 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	if relayInfo.IsPlayground {
 		return nil
 	}
+	// 管理端内部调用（如渠道测试）没有令牌上下文：令牌维度无从预扣，
+	// 误走 TryReserveTokenQuota 会对 id=0 的更新影响 0 行并误报
+	// "token quota is not enough"。此时计费仅由资金来源（钱包/订阅）承担。
+	if relayInfo.TokenId == 0 && relayInfo.TokenKey == "" {
+		return nil
+	}
 	// 原子预扣：检查与扣减在同一操作中完成，并发请求不可能同时通过检查后超扣。
 	reserved, err := model.TryReserveTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota, relayInfo.TokenUnlimited)
 	if err != nil {

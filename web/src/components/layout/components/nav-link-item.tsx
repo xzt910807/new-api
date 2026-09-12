@@ -28,7 +28,7 @@ interface NavLinkItemProps {
 }
 
 /**
- * Renders a single navigation link (internal or external)
+ * Renders a single navigation link (internal, external, or new-tab)
  * Handles routing and proper link attributes
  */
 export function NavLinkItem({ link, className }: NavLinkItemProps) {
@@ -38,7 +38,7 @@ export function NavLinkItem({ link, className }: NavLinkItemProps) {
     className
   )
 
-  if (link.external) {
+  if (link.external || link.newTab) {
     return (
       <a
         href={link.href}

@@ -164,17 +164,34 @@ func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string
 
 	formData := c.Request.PostForm
 	req = TaskSubmitReq{
-		Prompt:   formData.Get("prompt"),
-		Model:    formData.Get("model"),
-		Mode:     formData.Get("mode"),
-		Image:    formData.Get("image"),
-		Size:     formData.Get("size"),
-		Metadata: make(map[string]interface{}),
+		Prompt:      formData.Get("prompt"),
+		Model:       formData.Get("model"),
+		Mode:        formData.Get("mode"),
+		Image:       formData.Get("image"),
+		Size:        formData.Get("size"),
+		AspectRatio: formData.Get("aspect_ratio"),
+		Resolution:  formData.Get("resolution"),
+		Metadata:    make(map[string]interface{}),
 	}
 
+	if durationStr := formData.Get("duration"); durationStr != "" {
+		if duration, err := strconv.Atoi(durationStr); err == nil {
+			req.Duration = duration
+		}
+	}
 	if durationStr := formData.Get("seconds"); durationStr != "" {
 		if duration, err := strconv.Atoi(durationStr); err == nil {
 			req.Duration = duration
+		}
+	}
+	if numFramesStr := formData.Get("num_frames"); numFramesStr != "" {
+		if numFrames, err := strconv.Atoi(numFramesStr); err == nil {
+			req.NumFrames = numFrames
+		}
+	}
+	if frameRateStr := formData.Get("frame_rate"); frameRateStr != "" {
+		if frameRate, err := strconv.Atoi(frameRateStr); err == nil {
+			req.FrameRate = frameRate
 		}
 	}
 
@@ -274,7 +291,12 @@ func isKnownTaskField(field string) bool {
 		"image":           true,
 		"images":          true,
 		"size":            true,
+		"aspect_ratio":    true,
+		"resolution":      true,
 		"duration":        true,
+		"seconds":         true,
+		"num_frames":      true,
+		"frame_rate":      true,
 		"input_reference": true, // Sora 特有字段
 	}
 	return knownFields[field]
@@ -306,6 +328,44 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 	if len(req.Images) == 0 && strings.TrimSpace(req.Image) != "" {
 		// 兼容单图上传
 		req.Images = []string{req.Image}
+	}
+
+	// 兼容同时发送 duration 和 seconds 的任务请求
+	if req.Duration > 0 && strings.TrimSpace(req.Seconds) == "" {
+		req.Seconds = strconv.Itoa(req.Duration)
+	}
+	if req.Duration == 0 && strings.TrimSpace(req.Seconds) != "" {
+		if seconds, err := strconv.Atoi(req.Seconds); err == nil {
+			req.Duration = seconds
+		}
+	}
+
+	// 兼容 AgnesAI 的 num_frames/frame_rate：根据帧数推导出秒数供计费使用
+	if req.NumFrames > 0 && req.Duration == 0 {
+		frameRate := req.FrameRate
+		if frameRate <= 0 {
+			frameRate = 24
+		}
+		req.Duration = req.NumFrames / frameRate
+		if req.NumFrames%frameRate != 0 {
+			req.Duration++
+		}
+		req.Seconds = strconv.Itoa(req.Duration)
+	}
+	if req.NumFrames > 0 && req.FrameRate <= 0 {
+		req.FrameRate = 24
+	}
+
+	// 兼容分开的 aspect_ratio/resolution 字段：
+	// size 可能是旧版的宽高比（含冒号），也可能是新版的分辨率（如 480p）。
+	if strings.TrimSpace(req.AspectRatio) == "" && strings.TrimSpace(req.Size) != "" && strings.Contains(req.Size, ":") {
+		req.AspectRatio = req.Size
+	}
+	if strings.TrimSpace(req.Resolution) == "" && strings.TrimSpace(req.Size) != "" && !strings.Contains(req.Size, ":") {
+		req.Resolution = req.Size
+	}
+	if strings.TrimSpace(req.Size) == "" && strings.TrimSpace(req.AspectRatio) != "" {
+		req.Size = req.AspectRatio
 	}
 
 	storeTaskRequest(c, info, action, req)
