@@ -250,6 +250,12 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	info.IsChannelTest = true
 	info.InitChannelMeta(c)
 
+	// 渠道测试不走 PreConsumeBilling，需在此显式判定会员免费，
+	// 使测试日志的 other 携带 membership_free 标记（与真实请求日志一致）。
+	if service.IsMembershipFreeRequest(info) {
+		info.IsMembershipFreeModel = true
+	}
+
 	err = attachTestBillingRequestInput(info, request)
 	if err != nil {
 		return testResult{
