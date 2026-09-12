@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 import { uploadFiles } from '../../api'
+import { parseRequestErrorDetails } from '../../lib'
 import type { GalleryItem } from '../../types'
 
 interface GalleryPanelProps {
@@ -78,8 +79,8 @@ export function GalleryPanel({
       }
       toast.success(t('Uploaded {{count}} image(s)', { count: newItems.length }))
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(t('Upload failed'), { description: message })
+      const { errorMessage } = parseRequestErrorDetails(err)
+      toast.error(t('Upload failed'), { description: errorMessage })
     } finally {
       setIsUploading(false)
     }

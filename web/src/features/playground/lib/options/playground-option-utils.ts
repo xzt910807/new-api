@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { GroupOption, ModelOption } from '../../types'
+import { parseRequestErrorDetails } from '../streaming/request-error-utils'
 
 export function getModelFallback(
   models: ModelOption[],
@@ -61,5 +62,5 @@ export function getOptionLoadErrorMessage(
   error: unknown,
   fallbackMessage: string
 ): string {
-  return error instanceof Error ? error.message : fallbackMessage
+  return parseRequestErrorDetails(error, fallbackMessage).errorMessage
 }

@@ -24,6 +24,7 @@ import { toast } from 'sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 import { getUserTaskModels, submitTask } from '../../api'
+import { parseRequestErrorDetails } from '../../lib'
 import type { GalleryItem } from '../../types'
 
 import {
@@ -211,8 +212,8 @@ export function TaskPlayground() {
       setActiveTaskId(response.task_id)
       toast.success(t('Task submitted'))
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(t('Failed to submit task'), { description: message })
+      const { errorMessage } = parseRequestErrorDetails(err)
+      toast.error(t('Failed to submit task'), { description: errorMessage })
     } finally {
       setIsSubmitting(false)
     }
@@ -236,7 +237,7 @@ export function TaskPlayground() {
       <Alert variant='destructive' className='m-4'>
         <AlertTitle>{t('Failed to load task models')}</AlertTitle>
         <AlertDescription>
-          {error instanceof Error ? error.message : String(error)}
+          {parseRequestErrorDetails(error).errorMessage}
         </AlertDescription>
       </Alert>
     )

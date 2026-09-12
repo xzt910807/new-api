@@ -41,6 +41,7 @@ import {
   sendChatCompletion,
   submitTask,
 } from '../../api'
+import { parseRequestErrorDetails } from '../../lib'
 import type { GalleryItem, TaskPluginOption } from '../../types'
 
 import { GalleryPanel } from './gallery-panel'
@@ -159,8 +160,8 @@ export function TaskWorkflow({ group }: TaskWorkflowProps) {
       setRefinedPrompt(content.trim())
       setStep('image')
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(t('Failed to refine prompt'), { description: message })
+      const { errorMessage } = parseRequestErrorDetails(err)
+      toast.error(t('Failed to refine prompt'), { description: errorMessage })
     } finally {
       setIsRefining(false)
     }
@@ -187,8 +188,10 @@ export function TaskWorkflow({ group }: TaskWorkflowProps) {
       })
       setImageTaskId(response.task_id)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(t('Failed to submit image task'), { description: message })
+      const { errorMessage } = parseRequestErrorDetails(err)
+      toast.error(t('Failed to submit image task'), {
+        description: errorMessage,
+      })
     } finally {
       setIsGeneratingImage(false)
     }
@@ -278,8 +281,8 @@ export function TaskWorkflow({ group }: TaskWorkflowProps) {
       setStep('video')
       toast.success(t('Task submitted'))
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(t('Failed to submit task'), { description: message })
+      const { errorMessage } = parseRequestErrorDetails(err)
+      toast.error(t('Failed to submit task'), { description: errorMessage })
     } finally {
       setIsSubmitting(false)
     }

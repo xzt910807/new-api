@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils'
 import type { TaskArtifact } from '@/features/usage-logs/types'
 
 import { getTaskArtifactsForPlayground, getUserTaskById } from '../../api'
+import { parseRequestErrorDetails } from '../../lib'
 import type { GalleryItem, TaskItem } from '../../types'
 
 const TERMINAL_STATUSES = new Set(['SUCCESS', 'FAILURE'])
@@ -74,7 +75,7 @@ export function TaskResultPanel({
               }
             } catch (err) {
               if (!cancelled) {
-                setError(err instanceof Error ? err.message : String(err))
+                setError(parseRequestErrorDetails(err).errorMessage)
               }
             } finally {
               if (!cancelled) {
@@ -88,7 +89,7 @@ export function TaskResultPanel({
         timeoutId = window.setTimeout(poll, POLL_INTERVAL_MS)
       } catch (err) {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
+        setError(parseRequestErrorDetails(err).errorMessage)
       }
     }
 
