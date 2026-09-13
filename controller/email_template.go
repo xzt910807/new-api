@@ -83,7 +83,7 @@ func buildVerificationEmailBody(code string, validMinutes int) string {
 		blueBar("请输入以下验证码以确认您的邮箱地址：", 15, false, 16, 6),
 		code,
 		blueBar(fmt.Sprintf("验证码 %d 分钟内有效，如果您没有请求此验证码，请忽略此邮件。", validMinutes), 14, false, 16, 6),
-		time.Now().Year(), "爱思科技")
+		time.Now().Year(), "AI WTS")
 }
 
 // buildPasswordResetEmailBody 生成 AI WTS 风格的品牌化密码重置邮件正文（HTML）。
@@ -155,5 +155,5 @@ func buildPasswordResetEmailBody(link string, validMinutes int) string {
 		button,
 		link,
 		blueBar(fmt.Sprintf("重置链接 %d 分钟内有效，如果您没有请求此重置，请忽略此邮件。", validMinutes), 14, false, 16, 6),
-		time.Now().Year(), "爱思科技")
+		time.Now().Year(), "AI WTS")
 }

@@ -16,7 +16,7 @@ func TestEmailTemplateBodyFormat(t *testing.T) {
 	require.Contains(t, ver, "AI WTS")
 	require.Contains(t, ver, "123456")
 	require.Contains(t, ver, "验证码 10 分钟内有效")
-	require.Contains(t, ver, fmt.Sprintf("&copy; %d 爱思科技", time.Now().Year()))
+	require.Contains(t, ver, fmt.Sprintf("&copy; %d AI WTS", time.Now().Year()))
 	require.Contains(t, ver, `bgcolor="#2563eb"`)
 	// 不允许出现未替换的 fmt verb 残留
 	for _, leftover := range []string{"%d", "%s", "%!", "%%"} {
@@ -27,7 +27,7 @@ func TestEmailTemplateBodyFormat(t *testing.T) {
 	require.Contains(t, reset, "AI WTS")
 	require.Contains(t, reset, `href="https://example.com/user/reset?token=abc"`)
 	require.Contains(t, reset, "重置链接 10 分钟内有效")
-	require.Contains(t, reset, fmt.Sprintf("&copy; %d 爱思科技", time.Now().Year()))
+	require.Contains(t, reset, fmt.Sprintf("&copy; %d AI WTS", time.Now().Year()))
 	for _, leftover := range []string{"%d", "%s", "%!", "%%"} {
 		assert.NotContains(t, reset, leftover)
 	}
