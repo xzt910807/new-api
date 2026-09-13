@@ -1,6 +1,7 @@
 package common
 
 import (
+	crand "crypto/rand"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,23 @@ func GenerateVerificationCode(length int) string {
 		return code
 	}
 	return code[:length]
+}
+
+// GenerateNumericVerificationCode 生成指定位数的纯数字验证码（仅含 0-9，供邮件验证码使用）。
+func GenerateNumericVerificationCode(length int) string {
+	if length <= 0 {
+		length = 6
+	}
+	buf := make([]byte, length)
+	if _, err := crand.Read(buf); err != nil {
+		for i := range buf {
+			buf[i] = byte(GetRandomInt(10))
+		}
+	}
+	for i := range buf {
+		buf[i] = '0' + buf[i]%10
+	}
+	return string(buf)
 }
 
 func RegisterVerificationCodeWithKey(key string, code string, purpose string) {

@@ -5,7 +5,19 @@ import (
 	"time"
 )
 
-// buildVerificationEmailBody 生成 Agnes 风格的品牌化验证码邮件正文（HTML）。
+// blueBar 返回一段蓝色圆角横条的邮件 HTML。
+// 使用 table+td bgcolor 结构而非 span inline-block，
+// 兼容 Outlook 桌面版等不支持 inline-block 背景色的邮件客户端。
+func blueBar(text string, fontSize int, bold bool, padH int, padV int) string {
+	weight := "normal"
+	if bold {
+		weight = "bold"
+	}
+	return fmt.Sprintf(`<table role="presentation" cellpadding="0" cellspacing="0" align="center"><tr><td align="center" bgcolor="#2563eb" style="background-color:#2563eb;color:#ffffff;font-size:%dpx;font-weight:%s;padding:%dpx %dpx;border-radius:4px;">%s</td></tr></table>`,
+		fontSize, weight, padV, padH, text)
+}
+
+// buildVerificationEmailBody 生成 AI WTS 风格的品牌化验证码邮件正文（HTML）。
 func buildVerificationEmailBody(code string, validMinutes int) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN">
@@ -22,19 +34,19 @@ func buildVerificationEmailBody(code string, validMinutes int) string {
 <!-- Header -->
 <tr>
 <td align="center" style="padding:48px 40px 24px;">
-<div style="font-size:42px;font-weight:bold;font-style:italic;color:#1a1a1a;letter-spacing:1px;">Agnes</div>
+<div style="font-size:42px;font-weight:bold;font-style:italic;color:#1a1a1a;letter-spacing:1px;">AI WTS</div>
 </td>
 </tr>
 <!-- Title -->
 <tr>
 <td align="center" style="padding:0 40px 24px;">
-<span style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:22px;font-weight:bold;padding:10px 32px;border-radius:4px;">验证您的邮箱地址</span>
+%s
 </td>
 </tr>
 <!-- Instruction -->
 <tr>
 <td align="center" style="padding:0 40px 24px;">
-<span style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;padding:6px 16px;border-radius:4px;">请输入以下验证码以确认您的邮箱地址：</span>
+%s
 </td>
 </tr>
 <!-- Code Box -->
@@ -42,7 +54,7 @@ func buildVerificationEmailBody(code string, validMinutes int) string {
 <td align="center" style="padding:0 40px 32px;">
 <table role="presentation" width="100%%" cellpadding="0" cellspacing="0">
 <tr>
-<td align="center" style="background-color:#f8f9fa;border-radius:8px;padding:32px;">
+<td align="center" bgcolor="#f8f9fa" style="background-color:#f8f9fa;border-radius:8px;padding:32px;">
 <span style="font-size:44px;font-weight:bold;color:#2563eb;letter-spacing:12px;font-family:'Courier New',Courier,monospace;">%s</span>
 </td>
 </tr>
@@ -52,7 +64,7 @@ func buildVerificationEmailBody(code string, validMinutes int) string {
 <!-- Note -->
 <tr>
 <td align="center" style="padding:0 40px 40px;">
-<span style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:14px;padding:6px 16px;border-radius:4px;">验证码 %%d 分钟内有效，如果您没有请求此验证码，请忽略此邮件。</span>
+%s
 </td>
 </tr>
 <!-- Footer -->
@@ -66,11 +78,17 @@ func buildVerificationEmailBody(code string, validMinutes int) string {
 </tr>
 </table>
 </body>
-</html>`, code, validMinutes, time.Now().Year(), "爱思科技")
+</html>`,
+		blueBar("验证您的邮箱地址", 22, true, 32, 10),
+		blueBar("请输入以下验证码以确认您的邮箱地址：", 15, false, 16, 6),
+		code,
+		blueBar(fmt.Sprintf("验证码 %d 分钟内有效，如果您没有请求此验证码，请忽略此邮件。", validMinutes), 14, false, 16, 6),
+		time.Now().Year(), "爱思科技")
 }
 
-// buildPasswordResetEmailBody 生成 Agnes 风格的品牌化密码重置邮件正文（HTML）。
+// buildPasswordResetEmailBody 生成 AI WTS 风格的品牌化密码重置邮件正文（HTML）。
 func buildPasswordResetEmailBody(link string, validMinutes int) string {
+	button := fmt.Sprintf(`<table role="presentation" cellpadding="0" cellspacing="0" align="center"><tr><td align="center" bgcolor="#2563eb" style="background-color:#2563eb;border-radius:6px;"><a href="%s" target="_blank" style="display:inline-block;color:#ffffff;font-size:16px;font-weight:bold;padding:14px 48px;text-decoration:none;">重置密码</a></td></tr></table>`, link)
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -86,25 +104,25 @@ func buildPasswordResetEmailBody(link string, validMinutes int) string {
 <!-- Header -->
 <tr>
 <td align="center" style="padding:48px 40px 24px;">
-<div style="font-size:42px;font-weight:bold;font-style:italic;color:#1a1a1a;letter-spacing:1px;">Agnes</div>
+<div style="font-size:42px;font-weight:bold;font-style:italic;color:#1a1a1a;letter-spacing:1px;">AI WTS</div>
 </td>
 </tr>
 <!-- Title -->
 <tr>
 <td align="center" style="padding:0 40px 24px;">
-<span style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:22px;font-weight:bold;padding:10px 32px;border-radius:4px;">重置您的密码</span>
+%s
 </td>
 </tr>
 <!-- Instruction -->
 <tr>
 <td align="center" style="padding:0 40px 24px;">
-<span style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;padding:6px 16px;border-radius:4px;">请点击下方按钮重置您的密码：</span>
+%s
 </td>
 </tr>
 <!-- Button -->
 <tr>
 <td align="center" style="padding:0 40px 32px;">
-<a href="%s" style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:16px;font-weight:bold;padding:14px 48px;border-radius:6px;text-decoration:none;">重置密码</a>
+%s
 </td>
 </tr>
 <!-- Fallback link -->
@@ -117,7 +135,7 @@ func buildPasswordResetEmailBody(link string, validMinutes int) string {
 <!-- Note -->
 <tr>
 <td align="center" style="padding:0 40px 40px;">
-<span style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:14px;padding:6px 16px;border-radius:4px;">重置链接 %%d 分钟内有效，如果您没有请求此重置，请忽略此邮件。</span>
+%s
 </td>
 </tr>
 <!-- Footer -->
@@ -131,5 +149,11 @@ func buildPasswordResetEmailBody(link string, validMinutes int) string {
 </tr>
 </table>
 </body>
-</html>`, link, link, validMinutes, time.Now().Year(), "爱思科技")
+</html>`,
+		blueBar("重置您的密码", 22, true, 32, 10),
+		blueBar("请点击下方按钮重置您的密码：", 15, false, 16, 6),
+		button,
+		link,
+		blueBar(fmt.Sprintf("重置链接 %d 分钟内有效，如果您没有请求此重置，请忽略此邮件。", validMinutes), 14, false, 16, 6),
+		time.Now().Year(), "爱思科技")
 }
