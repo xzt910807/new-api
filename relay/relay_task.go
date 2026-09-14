@@ -222,6 +222,14 @@ func resolveTaskBillingModel(c *gin.Context, originModel string) string {
 				}
 				if resolution == "" {
 					resolution = strings.TrimSpace(gjson.GetBytes(body, "resolution").String())
+					if resolution == "" {
+						// 画布请求只带 width/height（如 1280x720），无 resolution 字段，
+						// 按短边归入 480p/720p/1080p 计费档
+						resolution = resolutionBucketFromDimensions(
+							int(gjson.GetBytes(body, "width").Int()),
+							int(gjson.GetBytes(body, "height").Int()),
+						)
+					}
 				}
 			}
 		}
@@ -229,6 +237,7 @@ func resolveTaskBillingModel(c *gin.Context, originModel string) string {
 	if duration <= 0 || resolution == "" {
 		return originModel
 	}
+	resolution = strings.ToLower(resolution)
 	bucket := "short"
 	switch {
 	case duration < 6:
@@ -243,6 +252,23 @@ func resolveTaskBillingModel(c *gin.Context, originModel string) string {
 		return billingKey
 	}
 	return originModel
+}
+
+// resolutionBucketFromDimensions 将像素尺寸归入计费分辨率档。取短边对齐
+// 业界命名（1280x720 与竖屏 720x1280 均为 720p），未知/非法尺寸返回空串，
+// 调用方回退到原始模型按次价。
+func resolutionBucketFromDimensions(width, height int) string {
+	minDim := min(width, height)
+	switch {
+	case minDim <= 0:
+		return ""
+	case minDim <= 480:
+		return "480p"
+	case minDim <= 720:
+		return "720p"
+	default:
+		return "1080p"
+	}
 }
 
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
