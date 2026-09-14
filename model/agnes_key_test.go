@@ -308,3 +308,24 @@ func TestAgnesAcquireKeyDisabledAndInvalidKind(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, errAgnesNoAvailableKey)
 }
+
+func TestAgnesDisableKey(t *testing.T) {
+	setupAgnesKeysTest(t)
+	key := insertAgnesKey(t, &AgnesKey{ApiKey: "dead", Enabled: 1, Priority: 1, TextLimit: 10, LastResetDate: agnesToday()})
+
+	// id=0 为静默 no-op
+	assert.NoError(t, AgnesDisableKey(0))
+
+	// 禁用后 enabled=0，且不再被选取
+	require.NoError(t, AgnesDisableKey(key.Id))
+	reloaded := loadAgnesKey(t, key.Id)
+	assert.Equal(t, 0, reloaded.Enabled)
+
+	_, err := AgnesAcquireKey(AgnesKeyKindText, 1, "")
+	require.ErrorIs(t, err, errAgnesNoAvailableKey)
+
+	// 重复禁用幂等：已禁用的行不受影响，也无错误
+	require.NoError(t, AgnesDisableKey(key.Id))
+	reloaded = loadAgnesKey(t, key.Id)
+	assert.Equal(t, 0, reloaded.Enabled)
+}

@@ -369,7 +369,9 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+	// agnes_keys 池密钥被上游 401/403 拒绝时只禁用该密钥，不升级渠道级封禁
+	agnesKeyDisabled := disableAgnesKeyOnAuthFailure(c, err.StatusCode)
+	if service.ShouldDisableChannel(err) && channelError.AutoBan && !agnesKeyDisabled {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
@@ -922,6 +924,25 @@ func agnesKeyMetaFromContext(c *gin.Context) *model.AgnesKey {
 		return nil
 	}
 	return meta
+}
+
+// disableAgnesKeyOnAuthFailure 上游以 401/403 拒绝池内密钥时自动将其禁用
+// （401 密钥无效，403 密钥被封或上游侧配额耗尽），返回是否已禁用。
+// 其余状态码属于渠道/网络级故障，不消耗密钥名额。
+func disableAgnesKeyOnAuthFailure(c *gin.Context, statusCode int) bool {
+	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
+		return false
+	}
+	agnesKey := agnesKeyMetaFromContext(c)
+	if agnesKey == nil {
+		return false
+	}
+	if err := model.AgnesDisableKey(agnesKey.Id); err != nil {
+		logger.LogError(c, fmt.Sprintf("agnes_keys auto-disable failed: key_id=%d status=%d err=%v", agnesKey.Id, statusCode, err))
+		return false
+	}
+	common.SysError(fmt.Sprintf("agnes_keys auto-disabled key_id=%d after upstream status %d", agnesKey.Id, statusCode))
+	return true
 }
 
 // agnesVideoSecondsForCharge 提取视频任务的计费秒数：优先取阶梯计费快照中的

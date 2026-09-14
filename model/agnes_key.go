@@ -150,6 +150,18 @@ func AgnesRefundVideoSeconds(id int, seconds float64) error {
 	).Error
 }
 
+// AgnesDisableKey 将池内指定密钥置为禁用（enabled=0），供上游 401/403
+// 失效反馈自动触发；只影响当前启用中的行，重复调用幂等。
+func AgnesDisableKey(id int) error {
+	if id == 0 {
+		return nil
+	}
+	return DB.Exec(
+		"UPDATE agnes_keys SET enabled = 0 WHERE id = ? AND enabled = 1",
+		id,
+	).Error
+}
+
 // AgnesAnyEnabledKey 轮询兜底：任务缺少存储 key 时取任意启用密钥（优先高 priority）。
 func AgnesAnyEnabledKey(baseURL string) (string, error) {
 	var key AgnesKey
