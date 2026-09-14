@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Settings, Zap, BarChart3 } from 'lucide-react'
+import { Download, PenLine, WandSparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AnimateInView } from '@/components/animate-in-view'
@@ -27,25 +27,21 @@ export function HowItWorks() {
   const steps = [
     {
       num: '1',
-      title: t('Configure'),
-      desc: t(
-        'Add your API keys, set up channels and configure access permissions'
-      ),
-      icon: <Settings className='size-6' strokeWidth={1.5} />,
+      title: t('Describe your idea'),
+      desc: t('Type a prompt or start from a template.'),
+      icon: <PenLine className='size-6' strokeWidth={1.5} />,
     },
     {
       num: '2',
-      title: t('Connect'),
-      desc: t(
-        'Connect through OpenAI, Claude, Gemini, and other compatible API routes'
-      ),
-      icon: <Zap className='size-6' strokeWidth={1.5} />,
+      title: t('Generate with AI'),
+      desc: t('Models render images and videos from your description.'),
+      icon: <WandSparkles className='size-6' strokeWidth={1.5} />,
     },
     {
       num: '3',
-      title: t('Monitor'),
-      desc: t('Track usage, costs and performance with real-time analytics'),
-      icon: <BarChart3 className='size-6' strokeWidth={1.5} />,
+      title: t('Download and share'),
+      desc: t('Export your creation and share it anywhere.'),
+      icon: <Download className='size-6' strokeWidth={1.5} />,
     },
   ]
 
@@ -57,7 +53,7 @@ export function HowItWorks() {
             {t('How It Works')}
           </p>
           <h2 className='text-2xl font-bold tracking-tight md:text-3xl'>
-            {t('Three steps to get started')}
+            {t('From idea to video in three steps')}
           </h2>
         </AnimateInView>
 

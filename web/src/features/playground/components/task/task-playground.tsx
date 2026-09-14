@@ -65,9 +65,27 @@ function saveGallery(items: GalleryItem[]) {
   }
 }
 
-export function TaskPlayground() {
+interface TaskPlaygroundProps {
+  /** Preset model from a deep link; falls back to the default when invalid. */
+  initialModel?: string
+  /** Preset prompt from a deep link. */
+  initialPrompt?: string
+  /** Preset aspect ratio from a deep link. */
+  initialSize?: string
+}
+
+export function TaskPlayground({
+  initialModel,
+  initialPrompt,
+  initialSize,
+}: TaskPlaygroundProps = {}) {
   const { t } = useTranslation()
-  const [formData, setFormData] = useState<TaskFormData>(DEFAULT_FORM_DATA)
+  const [formData, setFormData] = useState<TaskFormData>({
+    ...DEFAULT_FORM_DATA,
+    model: initialModel ?? '',
+    prompt: initialPrompt ?? '',
+    size: initialSize ?? '',
+  })
   const [gallery, setGallery] = useState<GalleryItem[]>(loadGallery)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
@@ -83,9 +101,13 @@ export function TaskPlayground() {
   })
 
   useEffect(() => {
-    if (formData.model || plugins.length === 0) return
+    if (plugins.length === 0) return
 
     const allModels = plugins.flatMap((plugin) => plugin.models)
+    // Keep the current selection (including a deep-linked preset) as long as
+    // it exists; otherwise fall back to the default model.
+    if (formData.model && allModels.includes(formData.model)) return
+
     const defaultModel =
       allModels.find((model) => model === 'agnes-video-v2.0') ??
       allModels[0]

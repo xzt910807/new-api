@@ -50,6 +50,8 @@ interface PlaygroundInputProps {
   groupValue: string
   onGroupChange: (value: string) => void
   hasMessages?: boolean
+  /** Initial textarea content (e.g. preset from a template deep link). */
+  initialText?: string
   onConfigChange: <K extends keyof PlaygroundConfig>(
     key: K,
     value: PlaygroundConfig[K]
@@ -76,13 +78,14 @@ export function PlaygroundInput({
   groupValue,
   onGroupChange,
   hasMessages = false,
+  initialText,
   onConfigChange,
   onClearMessages,
   onParameterEnabledChange,
   parameterEnabled,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText ?? '')
 
   const handleSubmit = (message: PromptInputMessage) => {
     const submittableText = getSubmittableInputText(message, disabled)

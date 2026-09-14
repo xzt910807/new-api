@@ -22,7 +22,44 @@ import { Main } from '@/components/layout'
 import { Playground } from '@/features/playground'
 import { isSidebarModuleEnabled } from '@/lib/nav-modules'
 
+export interface PlaygroundSearch {
+  model?: string
+  prompt?: string
+  mode?: 'video' | 'chat'
+  size?: string
+}
+
+const PLAYGROUND_SIZE_WHITELIST = new Set(['16:9', '9:16', '1:1', '4:3', '3:4'])
+
+/**
+ * Deep-link preset support: `/playground?model=..&prompt=..&mode=video|chat&size=..`.
+ * Only the whitelist fields above are kept; anything else in the URL is
+ * dropped so injected params cannot reach the playground state.
+ */
+function validateSearch(search: Record<string, unknown>): PlaygroundSearch {
+  const result: PlaygroundSearch = {}
+
+  if (typeof search.model === 'string' && search.model.trim()) {
+    result.model = search.model.trim().slice(0, 200)
+  }
+  if (typeof search.prompt === 'string' && search.prompt.trim()) {
+    result.prompt = search.prompt.trim().slice(0, 4000)
+  }
+  if (search.mode === 'video' || search.mode === 'chat') {
+    result.mode = search.mode
+  }
+  if (
+    typeof search.size === 'string' &&
+    PLAYGROUND_SIZE_WHITELIST.has(search.size)
+  ) {
+    result.size = search.size
+  }
+
+  return result
+}
+
 export const Route = createFileRoute('/_authenticated/playground/')({
+  validateSearch,
   beforeLoad: () => {
     if (!isSidebarModuleEnabled('chat', 'playground')) {
       throw redirect({ to: '/dashboard' })
@@ -32,9 +69,11 @@ export const Route = createFileRoute('/_authenticated/playground/')({
 })
 
 function PlaygroundPage() {
+  const search = Route.useSearch()
+
   return (
     <Main className='p-0'>
-      <Playground />
+      <Playground preset={search} />
     </Main>
   )
 }

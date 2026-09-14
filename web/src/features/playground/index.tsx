@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from '@tanstack/react-router'
 
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
@@ -33,9 +34,26 @@ import {
 type PlaygroundMode = 'chat' | 'video'
 type VideoSubMode = 'single' | 'workflow'
 
-export function Playground() {
+export interface PlaygroundPreset {
+  model?: string
+  prompt?: string
+  mode?: 'video' | 'chat'
+  size?: string
+}
+
+interface PlaygroundProps {
+  preset?: PlaygroundPreset
+}
+
+export function Playground({ preset }: PlaygroundProps) {
   const { t } = useTranslation()
-  const [mode, setMode] = useState<PlaygroundMode>('video')
+  const navigate = useNavigate()
+  // Capture the first preset so a later URL cleanup (search reset) cannot
+  // re-apply or clear the prefilled state.
+  const [initialPreset] = useState<PlaygroundPreset | undefined>(preset)
+  const [mode, setMode] = useState<PlaygroundMode>(
+    initialPreset?.mode ?? 'video'
+  )
   const [videoSubMode, setVideoSubMode] = useState<VideoSubMode>('single')
   const {
     config,
@@ -84,6 +102,26 @@ export function Playground() {
     setModels,
     updateConfig,
   })
+
+  useEffect(() => {
+    if (initialPreset?.mode === 'chat' && initialPreset.model) {
+      updateConfig('model', initialPreset.model)
+    }
+  }, [initialPreset, updateConfig])
+
+  // Consume the deep-link params: drop them from the address bar so a
+  // refresh does not overwrite edits the user has made since.
+  useEffect(() => {
+    if (!initialPreset) return
+    const { model, prompt, mode: presetMode, size } = initialPreset
+    if (!model && !prompt && !presetMode && !size) return
+    navigate({ to: '/playground', search: {}, replace: true })
+  }, [initialPreset, navigate])
+
+  const videoPreset =
+    initialPreset && initialPreset.mode !== 'chat' ? initialPreset : undefined
+  const chatPresetPrompt =
+    initialPreset?.mode === 'chat' ? initialPreset.prompt : undefined
 
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
@@ -145,7 +183,11 @@ export function Playground() {
             </div>
           </div>
           {videoSubMode === 'single' ? (
-            <TaskPlayground />
+            <TaskPlayground
+              initialModel={videoPreset?.model}
+              initialPrompt={videoPreset?.prompt}
+              initialSize={videoPreset?.size}
+            />
           ) : (
             <TaskWorkflow group={config.group} />
           )}
@@ -176,6 +218,7 @@ export function Playground() {
               disabled={isGenerating}
               groups={groups}
               groupValue={config.group}
+              initialText={chatPresetPrompt}
               isGenerating={isGenerating}
               isModelLoading={isLoadingModels}
               modelValue={config.model}

@@ -16,8 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export { CTA } from './sections/cta'
-export { Capabilities } from './sections/capabilities'
-export { Hero } from './sections/hero'
-export { HowItWorks } from './sections/how-it-works'
-export { TemplateStrip } from './sections/template-strip'
+import { createFileRoute } from '@tanstack/react-router'
+
+import { TemplatesGallery } from '@/features/templates'
+
+export const Route = createFileRoute('/templates')({
+  component: TemplatesGallery,
+})

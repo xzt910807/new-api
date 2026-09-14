@@ -54,15 +54,15 @@ export function CTA(props: CTAProps) {
         animation='scale-in'
       >
         <h2 className='text-2xl leading-tight font-bold tracking-tight md:text-4xl'>
-          {t('Ready to simplify')}
+          {t('Ready to create')}
           <br />
           <span className='bg-gradient-to-r from-blue-400 via-violet-400 to-purple-500 bg-clip-text text-transparent'>
-            {t('your AI integration?')}
+            {t('your first AI video?')}
           </span>
         </h2>
         <p className='text-muted-foreground/80 mx-auto mt-5 max-w-md text-sm leading-relaxed md:text-base'>
           {t(
-            'Deploy your own gateway and start routing requests through your configured upstream services.'
+            'Sign up free and generate your first image or video in under a minute.'
           )}
         </p>
         <div className='mt-8 flex items-center justify-center gap-3'>
@@ -73,9 +73,9 @@ export function CTA(props: CTAProps) {
           <Button
             variant='outline'
             className='border-border/50 hover:border-border hover:bg-muted/50 rounded-lg'
-            render={<Link to='/pricing' />}
+            render={<Link to='/templates' />}
           >
-            {t('View Pricing')}
+            {t('Browse templates')}
           </Button>
         </div>
       </AnimateInView>

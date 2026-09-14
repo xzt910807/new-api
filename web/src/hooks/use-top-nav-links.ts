@@ -92,6 +92,11 @@ export function useTopNavLinks(): TopNavLink[] {
     links.push({ title: t('Rankings'), href: '/rankings', requiresAuth })
   }
 
+  // Templates gallery (public)
+  if (modules?.templates !== false) {
+    links.push({ title: t('Templates'), href: '/templates' })
+  }
+
   // Docs (supports external links)
   if (modules?.docs !== false) {
     if (docsLink) {
