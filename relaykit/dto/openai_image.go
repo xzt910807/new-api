@@ -38,6 +38,9 @@ type ImageRequest struct {
 	WatermarkEnabled json.RawMessage `json:"watermark_enabled,omitempty"`
 	UserId           json.RawMessage `json:"user_id,omitempty"`
 	Image            json.RawMessage `json:"image,omitempty"`
+	// extra_body 透传：Agnes 等上游的图生图参考图走 extra_body.image（OpenAI SDK 惯例），
+	// 必须作为已声明字段保留，否则未知字段落入 Extra 后 MarshalJSON 不会合并，参考图被静默丢弃
+	ExtraBody json.RawMessage `json:"extra_body,omitempty"`
 	// 用匿名参数接收额外参数
 	Extra map[string]json.RawMessage `json:"-"`
 }
